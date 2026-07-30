@@ -32,6 +32,15 @@ describe('explainAuthError', () => {
     assert.match(result, /pnpm db:start/);
   });
 
+  it('replaces a content-free message rather than rendering it', () => {
+    // Rendered as a bare "{}" in the sign-in form, which is worse than useless.
+    for (const raw of ['', '   ', '{}', '[object Object]']) {
+      const result = explainAuthError(raw, URL_);
+      assert.match(result, /no message/);
+      assert.match(result, /pnpm db:reset/);
+    }
+  });
+
   it('passes a real auth error through untouched', () => {
     // These already say something true and specific; rewriting them would lose
     // information rather than add it.

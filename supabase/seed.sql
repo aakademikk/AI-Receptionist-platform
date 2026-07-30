@@ -49,6 +49,48 @@ values (
 on conflict (id) do nothing;
 
 /*
+ * GoTrue reads several of auth.users' token columns into non-nullable Go strings, so a
+ * NULL in any of them fails to scan — the request errors out with something opaque
+ * rather than anything mentioning the column. Postgres defaults cover this for rows
+ * GoTrue creates itself; a row inserted by hand has to do it deliberately.
+ *
+ * This is the failure mode that replaces the invisible-user one: once the account can
+ * be found, it gets read, and then the NULLs matter. Symptom is a sign-in that errors
+ * for this address only, while any other address works fine.
+ *
+ * Driven off information_schema because the column set differs across GoTrue versions
+ * and naming a column that does not exist would fail the whole seed.
+ */
+do $$
+declare
+  v_col text;
+begin
+  for v_col in
+    select column_name
+    from information_schema.columns
+    where table_schema = 'auth'
+      and table_name = 'users'
+      and is_nullable = 'YES'
+      and data_type in ('character varying', 'text')
+      and column_name in (
+        'confirmation_token',
+        'recovery_token',
+        'email_change',
+        'email_change_token_new',
+        'email_change_token_current',
+        'phone_change',
+        'phone_change_token',
+        'reauthentication_token'
+      )
+  loop
+    execute format(
+      'update auth.users set %1$I = %2$L where id = %3$L and %1$I is null',
+      v_col, '', '00000000-0000-4000-8000-000000000001'
+    );
+  end loop;
+end $$;
+
+/*
  * The matching identity row. A bare `auth.users` row is enough to be found, but an
  * email-provider account is expected to have an identity, and its absence shows up
  * later in account linking and in the `identities` claim.

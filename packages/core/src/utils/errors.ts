@@ -117,6 +117,21 @@ export function isAppError(error: unknown): error is AppError {
  * link) is already meaningful and passes through untouched.
  */
 export function explainAuthError(message: string, supabaseUrl: string): string {
+  /*
+   * An empty or content-free message renders as a stray "{}" in the form, which tells
+   * the reader less than nothing. It happens when the auth service fails in a way that
+   * produces no message body — locally, the usual cause is a hand-inserted auth.users
+   * row with NULL token columns, which GoTrue cannot scan.
+   */
+  const trimmed = message.trim();
+  if (trimmed === '' || trimmed === '{}' || trimmed === '[object Object]') {
+    return (
+      'The auth service returned an error with no message. Locally this usually means ' +
+      'a manually inserted user row — run `pnpm db:reset` to reseed. Check the ' +
+      '`supabase_auth` container logs for the underlying cause.'
+    );
+  }
+
   if (message.includes('is not valid JSON') || message.includes('<!DOCTYPE')) {
     return (
       `${supabaseUrl} answered with a web page instead of the Supabase API. ` +
