@@ -43,7 +43,11 @@ services:
       n8n-db:
         condition: service_healthy
     ports:
-      - '5678:5678'
+      # Loopback only. `5678:5678` publishes on every interface, which on a laptop
+      # means anyone on the same network can reach an editor that holds the Supabase
+      # service-role key — and can claim the owner account before you do. Use an SSH
+      # tunnel or a reverse proxy with real auth if it needs to be remote.
+      - '127.0.0.1:5678:5678'
     environment:
       # --- Persistence ---
       DB_TYPE: postgresdb
@@ -58,9 +62,18 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
 
       # --- Access ---
-      N8N_BASIC_AUTH_ACTIVE: 'true'
-      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
-      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:?N8N_BASIC_AUTH_PASSWORD is required}
+      # There is deliberately no N8N_BASIC_AUTH_* here. Those variables were part of
+      # n8n 0.x and current n8n ignores them entirely — its AuthConfig exposes only
+      # N8N_SECURE_COOKIE / N8N_SAMESITE_COOKIE, and the legacy schema's
+      # authenticationMethod accepts email, ldap or saml. Setting them would create
+      # the impression that the editor is password-protected when nothing is
+      # enforcing it.
+      #
+      # What actually protects this instance: n8n requires an owner account to be
+      # created on first load, and the port below is bound to loopback so only this
+      # machine can reach it. Claim the owner account immediately after first start —
+      # whoever loads the editor first gets it, and an n8n owner can read every
+      # credential the instance holds, including the service-role key below.
 
       # --- Webhooks ---
       # n8n needs its own public URL to register webhooks correctly behind a proxy.

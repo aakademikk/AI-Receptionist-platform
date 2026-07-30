@@ -142,9 +142,17 @@ Railway, or a small VM all work; `docker-compose.yml` is the reference config.
 
 - **`N8N_ENCRYPTION_KEY` must be backed up somewhere other than the machine running
   n8n.** Losing it makes every stored credential unreadable.
-- Put it behind TLS and keep basic auth on. The webhook endpoints additionally
-  verify `x-atwood-secret`, so a leaked path is not a leaked capability — but
-  defence in depth is cheap here.
+- **Do not rely on `N8N_BASIC_AUTH_*`.** Those variables belonged to n8n 0.x and
+  current versions ignore them silently — the editor's `AuthConfig` exposes only
+  `N8N_SECURE_COOKIE` and `N8N_SAMESITE_COOKIE`, and the authentication methods are
+  email, LDAP and SAML. A compose file that sets them looks protected and is not.
+  What protects the instance is n8n's own owner account, which must be **claimed
+  immediately on first start** — whoever loads the editor first gets it, and an n8n
+  owner can read every credential the instance holds, including
+  `SUPABASE_SERVICE_ROLE_KEY`. Locally, compose binds the editor to `127.0.0.1`;
+  in production put it behind TLS and a reverse proxy that enforces auth of its own.
+- The webhook endpoints additionally verify `x-atwood-secret`, so a leaked path is
+  not a leaked capability — but that protects the workflows, not the editor.
 - `WEBHOOK_URL` must be the public URL, or n8n registers webhooks against its
   internal hostname.
 - `ATWOOD_API_URL` must be reachable **from inside the container**. On Docker
