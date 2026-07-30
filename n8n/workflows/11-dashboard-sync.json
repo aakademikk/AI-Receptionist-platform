@@ -1,0 +1,101 @@
+{
+  "name": "Atwood — 11 Dashboard Sync",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "atwood/dashboard-sync", "responseMode": "lastNode", "options": {} },
+      "id": "webhook",
+      "name": "Sync Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-320, -60],
+      "webhookId": "atwood-dashboard-sync",
+      "notes": "Optional cache-invalidation hook for deployments that serve dashboard pages from a CDN cache. Receives {business_id, paths[]}."
+    },
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] } },
+      "id": "schedule",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-320, 100],
+      "notes": "Safety net for the SLA nudge below. The live surfaces need no polling at all."
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/handover_queue",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [
+          { "name": "select", "value": "conversation_id,business_id,waiting_minutes,sla_breached,handover_reason_code" },
+          { "name": "sla_breached", "value": "is.true" },
+          { "name": "limit", "value": "100" }
+        ] },
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "apikey", "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+          { "name": "authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" }
+        ] },
+        "options": { "timeout": 20000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "overdue",
+      "name": "Find overdue handovers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-80, 100],
+      "notes": "The genuinely useful job on this schedule. A conversation escalated at 4pm and still unanswered at 4:20 needs chasing, and nothing else in the system notices the passage of time."
+    },
+    {
+      "parameters": {
+        "jsCode": "// One nudge per breached conversation. The notification's dedupe key is namespaced\n// per SLA multiple, so the owner is chased again as it gets worse rather than every\n// five minutes forever — an alert that repeats identically is an alert people mute.\nconst rows = $input.first().json;\nif (!Array.isArray(rows) || rows.length === 0) return [];\n\nreturn rows.map((row) => ({\n  json: {\n    business_id: row.business_id,\n    conversation_id: row.conversation_id,\n    waiting_minutes: row.waiting_minutes,\n    dedupe_key: `sla_breach:${row.conversation_id}:${Math.floor(row.waiting_minutes / 30)}`,\n    body: `A conversation has been waiting ${row.waiting_minutes} minutes for a person (${(row.handover_reason_code || 'escalated').replace(/_/g, ' ')}).`,\n  },\n}));"
+      },
+      "id": "build-nudges",
+      "name": "Build nudges",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [160, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/conversations/{{ $json.conversation_id }}/handover",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ reason: 'urgent', note: $json.body, notify: true }) }}",
+        "options": { "timeout": 20000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "nudge",
+      "name": "Re-alert the owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 100],
+      "notes": "request_handover is a no-op on an already-waiting thread, so this changes no state — it exists to re-trigger the notification under a fresh dedupe key."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/revalidate",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $json.body?.business_id, paths: $json.body?.paths || [] }) }}",
+        "options": { "timeout": 15000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "revalidate",
+      "name": "Invalidate cached pages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-80, -60]
+    }
+  ],
+  "connections": {
+    "Sync Webhook": { "main": [[{ "node": "Invalidate cached pages", "type": "main", "index": 0 }]] },
+    "Every 5 minutes": { "main": [[{ "node": "Find overdue handovers", "type": "main", "index": 0 }]] },
+    "Find overdue handovers": { "main": [[{ "node": "Build nudges", "type": "main", "index": 0 }]] },
+    "Build nudges": { "main": [[{ "node": "Re-alert the owner", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "none" },
+  "tags": [{ "name": "atwood" }, { "name": "scheduled" }],
+  "meta": { "description": "The dashboard does not need syncing in the usual sense — it reads Postgres directly, and the conversation viewer subscribes to Supabase Realtime, so an inbound SMS appears without any workflow involvement. This workflow covers the two things that genuinely need a scheduler: chasing handovers that have breached their SLA, and invalidating CDN-cached pages where a deployment uses one." }
+}

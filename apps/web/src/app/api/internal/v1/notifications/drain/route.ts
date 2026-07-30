@@ -19,7 +19,8 @@ export const POST = withInternalAuth(async (request, auth) => {
     throw forbidden('Draining the notification queue is a platform-level operation');
   }
 
-  const body = await readJson<{ limit?: unknown }>(request).catch(() => ({ limit: undefined }));
+  type Body = { limit?: unknown };
+  const body: Body = await readJson<Body>(request).catch(() => ({}) as Body);
   const requested = typeof body.limit === 'number' ? body.limit : 25;
   // Bounded so one invocation cannot run past a serverless timeout mid-batch and
   // leave rows stuck in `sending`.

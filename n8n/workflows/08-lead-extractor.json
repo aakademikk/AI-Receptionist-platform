@@ -1,0 +1,85 @@
+{
+  "name": "Atwood — 08 Lead Extractor",
+  "nodes": [
+    {
+      "parameters": { "workflowInputs": { "values": [{ "name": "conversation_id", "type": "string" }] } },
+      "id": "trigger",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-220, 0],
+      "notes": "The inbound pipeline extracts on every message already. This exists for the off-path cases: re-extracting after a prompt change, backfilling old threads, or a dashboard-triggered refresh."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/leads/extract",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ conversation_id: $json.conversation_id }) }}",
+        "options": { "timeout": 90000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "extract",
+      "name": "Extract lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, 0],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "notes": "Runs a schema-constrained model call and writes through upsert_lead, which merges rather than replaces — so a re-run can only add information and can never blank a field an earlier pass captured. That is what makes retrying safe."
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 }, "conditions": [
+          { "id": "qualified", "leftValue": "={{ $json.extraction?.lead_status }}", "rightValue": "qualified", "operator": { "type": "string", "operation": "equals" } }
+        ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "is-qualified",
+      "name": "Newly qualified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [260, 0],
+      "notes": "Notification fan-out already happens inside the pipeline with a dedupe key. This branch is for anything a tenant wants bolted on — pushing to their own CRM, a Slack ping, a webhook."
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "lead", "name": "lead_id", "value": "={{ $json.lead_id }}", "type": "string" },
+        { "id": "score", "name": "score", "value": "={{ $json.score }}", "type": "number" },
+        { "id": "status", "name": "lead_status", "value": "={{ $json.extraction?.lead_status }}", "type": "string" }
+      ] }, "options": {} },
+      "id": "qualified",
+      "name": "Qualified",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [500, -80]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "lead", "name": "lead_id", "value": "={{ $json.lead_id }}", "type": "string" },
+        { "id": "score", "name": "score", "value": "={{ $json.score }}", "type": "number" }
+      ] }, "options": {} },
+      "id": "recorded",
+      "name": "Recorded",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [500, 100]
+    }
+  ],
+  "connections": {
+    "Called by another workflow": { "main": [[{ "node": "Extract lead", "type": "main", "index": 0 }]] },
+    "Extract lead": { "main": [[{ "node": "Newly qualified?", "type": "main", "index": 0 }]] },
+    "Newly qualified?": { "main": [
+      [{ "node": "Qualified", "type": "main", "index": 0 }],
+      [{ "node": "Recorded", "type": "main", "index": 0 }]
+    ] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all" },
+  "tags": [{ "name": "atwood" }, { "name": "ai" }],
+  "meta": { "description": "Separate model call from the reply: prose for a human vs JSON for a database, and a malformed JSON block must never take the customer's reply down with it. Output is schema-constrained at the provider, then validated and coerced in code." }
+}

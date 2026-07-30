@@ -24,3 +24,7 @@ postgres-data/
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Next.js build output
+apps/web/.next/
+apps/web/next-env.d.ts

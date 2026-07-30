@@ -1,0 +1,85 @@
+{
+  "name": "Atwood — 13 Onboarding",
+  "nodes": [
+    {
+      "parameters": { "httpMethod": "POST", "path": "atwood/onboarding", "responseMode": "lastNode", "options": {} },
+      "id": "webhook",
+      "name": "Onboarding Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-400, 0],
+      "webhookId": "atwood-onboarding",
+      "notes": "Receives {job_id} when an owner submits their website URL. The dashboard can also poll the same endpoint directly; this exists so the crawl survives the owner closing the tab."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/onboarding/{{ $json.body.job_id }}/run",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "options": { "timeout": 240000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "step",
+      "name": "Advance one step",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-160, 0],
+      "notes": "A step function, not a long call: start the crawl, poll it, then extract. Each call is short and idempotent, so this loop is safe to interrupt and resume.\n\n240s timeout covers the extraction step, which runs at high effort over the whole site — the one call in the platform where a slow, expensive model is unambiguously worth it, because a good draft saves the owner an hour of typing."
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 }, "conditions": [
+          { "id": "in-progress", "leftValue": "={{ ['pending','scraping','extracting'].includes($json.status) }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+        ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "more",
+      "name": "Still working?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [80, 0]
+    },
+    {
+      "parameters": { "amount": 8 },
+      "id": "wait",
+      "name": "Wait 8 seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [320, -100],
+      "webhookId": "atwood-onboarding-wait",
+      "notes": "Polling interval. Fast enough that the owner sees the page-count tick up, slow enough not to hammer Firecrawl's status endpoint."
+    },
+    {
+      "parameters": {
+        "assignments": { "assignments": [
+          { "id": "job", "name": "job_id", "value": "={{ $('Onboarding Webhook').item.json.body.job_id }}", "type": "string" },
+          { "id": "status", "name": "status", "value": "={{ $json.status }}", "type": "string" },
+          { "id": "pages", "name": "pages_crawled", "value": "={{ $json.pagesCrawled || 0 }}", "type": "number" },
+          { "id": "err", "name": "error", "value": "={{ $json.error || null }}", "type": "string" }
+        ] },
+        "options": {}
+      },
+      "id": "finished",
+      "name": "Ready for review",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [320, 100],
+      "notes": "Terminal. The draft now sits in onboarding_jobs.extracted awaiting the owner's edits — it is never written straight to the live profile, and any knowledge it produced stays needs_review=true (and therefore out of every prompt) until approved."
+    }
+  ],
+  "connections": {
+    "Onboarding Webhook": { "main": [[{ "node": "Advance one step", "type": "main", "index": 0 }]] },
+    "Advance one step": { "main": [[{ "node": "Still working?", "type": "main", "index": 0 }]] },
+    "Still working?": { "main": [
+      [{ "node": "Wait 8 seconds", "type": "main", "index": 0 }],
+      [{ "node": "Ready for review", "type": "main", "index": 0 }]
+    ] },
+    "Wait 8 seconds": { "main": [[{ "node": "Advance one step", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all" },
+  "tags": [{ "name": "atwood" }, { "name": "onboarding" }],
+  "meta": { "description": "Website URL → draft business profile, via Firecrawl and a schema-constrained extraction.\n\nThe Wait node makes this a durable poll loop: n8n persists the execution between waits, so a crawl that takes two minutes does not hold a connection open anywhere." }
+}

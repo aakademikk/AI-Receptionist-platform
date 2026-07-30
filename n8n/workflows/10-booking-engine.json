@@ -1,0 +1,136 @@
+{
+  "name": "Atwood — 10 Booking Engine",
+  "nodes": [
+    {
+      "parameters": { "workflowInputs": { "values": [
+        { "name": "conversation_id", "type": "string" },
+        { "name": "business_id", "type": "string" },
+        { "name": "service_id", "type": "string" },
+        { "name": "chosen_start", "type": "string" },
+        { "name": "chosen_end", "type": "string" }
+      ] } },
+      "id": "trigger",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-360, 0],
+      "notes": "Two modes. No chosen_start: return real availability for the prompt. With chosen_start: book it. Same workflow because they are two halves of one exchange."
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 }, "conditions": [
+          { "id": "has-slot", "leftValue": "={{ ($json.chosen_start || '') !== '' }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+        ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "mode",
+      "name": "Booking or availability?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-120, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/bookings/create",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ conversation_id: $json.conversation_id, service_id: $json.service_id || null, start: $json.chosen_start, end: $json.chosen_end, created_by: 'ai' }) }}",
+        "options": { "timeout": 45000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "book",
+      "name": "Book it",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, -100],
+      "notes": "Availability is re-checked server-side before the write. Between the assistant offering a slot and the customer accepting it, minutes pass and someone else may have taken it — trusting the earlier check is how you double-book an owner's morning.\n\nNot retried: a 422 means the slot went, and retrying would not bring it back. The assistant is told and offers another."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/bookings/slots",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ business_id: $json.business_id, service_id: $json.service_id || null, max_slots: 4 }) }}",
+        "options": { "timeout": 45000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "slots",
+      "name": "Fetch real availability",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [120, 120],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "notes": "Returns both machine-readable slots and prompt_block — the exact text to paste into the system prompt. The wording is what stops the model inventing a time, so it ships next to the logic that computed the slots rather than being re-written here where it would drift."
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 }, "conditions": [
+          { "id": "booked", "leftValue": "={{ $json.error === undefined }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+        ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "booked-ok",
+      "name": "Booked?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [360, -100]
+    },
+    {
+      "parameters": {
+        "workflowId": { "__rl": true, "value": "Atwood — 03 Send SMS", "mode": "list" },
+        "workflowInputs": { "mappingMode": "defineBelow", "value": {
+          "conversation_id": "={{ $('Called by another workflow').item.json.conversation_id }}",
+          "body": "={{ $json.confirmation_text }}",
+          "sender": "ai"
+        } },
+        "options": {}
+      },
+      "id": "confirm",
+      "name": "Confirm to the customer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [600, -180],
+      "notes": "Sends the API's confirmation_text verbatim rather than asking the model to phrase it. The date is already formatted in the tenant's timezone; letting the model restate it is a reliable source of confident mistakes."
+    },
+    {
+      "parameters": {
+        "workflowId": { "__rl": true, "value": "Atwood — 03 Send SMS", "mode": "list" },
+        "workflowInputs": { "mappingMode": "defineBelow", "value": {
+          "conversation_id": "={{ $('Called by another workflow').item.json.conversation_id }}",
+          "body": "Sorry — that time has just been taken. Let me find you another and come straight back.",
+          "sender": "ai"
+        } },
+        "options": {}
+      },
+      "id": "clash",
+      "name": "Tell them it went",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [600, -20],
+      "notes": "Silence after a failed booking is the worst outcome: the customer believes they are booked in."
+    }
+  ],
+  "connections": {
+    "Called by another workflow": { "main": [[{ "node": "Booking or availability?", "type": "main", "index": 0 }]] },
+    "Booking or availability?": { "main": [
+      [{ "node": "Book it", "type": "main", "index": 0 }],
+      [{ "node": "Fetch real availability", "type": "main", "index": 0 }]
+    ] },
+    "Book it": { "main": [[{ "node": "Booked?", "type": "main", "index": 0 }]] },
+    "Booked?": { "main": [
+      [{ "node": "Confirm to the customer", "type": "main", "index": 0 }],
+      [{ "node": "Tell them it went", "type": "main", "index": 0 }]
+    ] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all" },
+  "tags": [{ "name": "atwood" }, { "name": "booking" }],
+  "meta": { "description": "Optional per tenant. The assistant may only offer slots this workflow returned — it never generates a time. Availability comes from Google Calendar freeBusy (opaque busy blocks only, so the assistant never sees the contents of the owner's diary) filtered by opening hours, minimum notice and buffer." }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "Atwood — 04 Business Loader",
+  "nodes": [
+    {
+      "parameters": { "workflowInputs": { "values": [{ "name": "business_id", "type": "string" }] } },
+      "id": "trigger",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/businesses/{{ $json.business_id }}/context",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }] },
+        "options": { "timeout": 20000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "load",
+      "name": "Load context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Returns profile, settings, services, service areas, opening hours, published knowledge and phone numbers in one response — the business_ai_context view does the aggregation in the database rather than six round trips here."
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "ctx", "name": "context", "value": "={{ $json.context }}", "type": "object" },
+        { "id": "name", "name": "business_name", "value": "={{ $json.context?.profile?.trading_name || $json.context?.name }}", "type": "string" },
+        { "id": "provider", "name": "ai_provider", "value": "={{ $json.context?.settings?.ai_provider }}", "type": "string" },
+        { "id": "model", "name": "ai_model", "value": "={{ $json.context?.settings?.ai_model }}", "type": "string" },
+        { "id": "booking", "name": "booking_enabled", "value": "={{ $json.context?.settings?.booking_enabled === true }}", "type": "boolean" },
+        { "id": "tz", "name": "timezone", "value": "={{ $json.context?.timezone }}", "type": "string" }
+      ] }, "options": {} },
+      "id": "flatten",
+      "name": "Flatten for branching",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [280, 0],
+      "notes": "Hoists the handful of fields other workflows actually branch on to the top level, so an IF node reads {{ $json.booking_enabled }} rather than a deep path."
+    }
+  ],
+  "connections": {
+    "Called by another workflow": { "main": [[{ "node": "Load context", "type": "main", "index": 0 }]] },
+    "Load context": { "main": [[{ "node": "Flatten for branching", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "atwood" }, { "name": "shared" }],
+  "meta": { "description": "Loads a tenant's full prompt context. Also the Knowledge Loader — published FAQs and policies arrive in the same payload, because for a typical small business the whole corpus is small enough to include wholesale, and wholesale beats retrieval (a missed retrieval means the assistant says 'I don't know' about something the owner documented)." }
+}

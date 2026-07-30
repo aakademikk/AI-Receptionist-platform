@@ -23,7 +23,8 @@ export const POST = withInternalAuth(async (request, auth) => {
     throw forbidden('The retention sweep is a platform-level operation');
   }
 
-  const body = await readJson<{ batch_limit?: unknown }>(request).catch(() => ({}));
+  type Body = { batch_limit?: unknown };
+  const body: Body = await readJson<Body>(request).catch(() => ({}) as Body);
   const requested = typeof body.batch_limit === 'number' ? body.batch_limit : 5_000;
   const batchLimit = Math.max(100, Math.min(requested, 50_000));
 

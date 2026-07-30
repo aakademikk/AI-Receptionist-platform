@@ -1,0 +1,61 @@
+{
+  "name": "Atwood — 03 Send SMS",
+  "nodes": [
+    {
+      "parameters": { "workflowInputs": { "values": [
+        { "name": "conversation_id", "type": "string" },
+        { "name": "body", "type": "string" },
+        { "name": "sender", "type": "string" }
+      ] } },
+      "id": "trigger",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-200, 0],
+      "notes": "Sub-workflow. Any workflow that needs to say something to a customer calls this rather than talking to Twilio itself, so recording-then-sending and the idempotency key live in one place."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/messages/send",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ conversation_id: $json.conversation_id, body: $json.body, sender: $json.sender || 'ai', take_over: false }) }}",
+        "options": { "timeout": 30000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "send",
+      "name": "Send via internal API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [40, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "take_over=false: a message sent by a workflow is the assistant speaking, so it must not mute the assistant. Only a human reply from the dashboard does that."
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "ok", "name": "ok", "value": "={{ $json.error === undefined }}", "type": "boolean" },
+        { "id": "sid", "name": "message_sid", "value": "={{ $json.message_sid || null }}", "type": "string" },
+        { "id": "err", "name": "error", "value": "={{ $json.error?.message || null }}", "type": "string" }
+      ] }, "options": {} },
+      "id": "result",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [280, 0]
+    }
+  ],
+  "connections": {
+    "Called by another workflow": { "main": [[{ "node": "Send via internal API", "type": "main", "index": 0 }]] },
+    "Send via internal API": { "main": [[{ "node": "Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all" },
+  "tags": [{ "name": "atwood" }, { "name": "shared" }],
+  "meta": { "description": "Shared SMS/WhatsApp sender. Records the message, sends it with a Twilio idempotency key, then reconciles the provider id and price back onto the row." }
+}

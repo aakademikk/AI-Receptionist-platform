@@ -1,0 +1,111 @@
+# =============================================================================
+# Local development stack.
+#
+# What is here: n8n and its Postgres.
+# What is not: Supabase. It has its own CLI (`pnpm db:start`) which runs Postgres,
+# GoTrue, PostgREST, Realtime and Studio together — reimplementing that here would
+# be a worse copy of a thing that already works, and would drift from the hosted
+# project the schema is actually deployed to.
+#
+# The Next.js app runs on the host (`pnpm dev`) so hot reload works properly. A
+# production image for it is in docker/web.Dockerfile for deployments that are not
+# on Vercel.
+# =============================================================================
+
+name: atwood
+
+services:
+  n8n-db:
+    image: postgres:16-alpine
+    container_name: atwood-n8n-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: n8n
+    volumes:
+      - n8n-db-data:/var/lib/postgresql/data
+    # Not published to the host: only n8n needs to reach it, and exposing a
+    # database port is how a dev machine ends up on someone's scan.
+    expose:
+      - '5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U n8n -d n8n']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: atwood-n8n
+    restart: unless-stopped
+    depends_on:
+      n8n-db:
+        condition: service_healthy
+    ports:
+      - '5678:5678'
+    environment:
+      # --- Persistence ---
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: n8n-db
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # --- Credential encryption ---
+      # Losing this makes every stored n8n credential unreadable. Back it up.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+
+      # --- Access ---
+      N8N_BASIC_AUTH_ACTIVE: 'true'
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:?N8N_BASIC_AUTH_PASSWORD is required}
+
+      # --- Webhooks ---
+      # n8n needs its own public URL to register webhooks correctly behind a proxy.
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_PORT: 5678
+
+      # --- What the workflows read ---
+      # Workflows reference these as $env.*, which keeps secrets out of the
+      # exported JSON — the files in n8n/workflows/ are safe to commit.
+      ATWOOD_API_URL: ${ATWOOD_API_URL:-http://host.docker.internal:3000}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL is required}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required}
+
+      # Allows $env.* inside expressions. Without it every workflow above breaks
+      # with an opaque "access to env vars is denied".
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: 'false'
+
+      # --- Housekeeping ---
+      # An execution log that grows unbounded is the most common way an n8n
+      # instance runs out of disk.
+      EXECUTIONS_DATA_PRUNE: 'true'
+      EXECUTIONS_DATA_MAX_AGE: 336 # hours (14 days)
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: 50000
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/London}
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+      N8N_LOG_LEVEL: ${N8N_LOG_LEVEL:-info}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      # Mounted read-only so the workflow JSON in git stays the source of truth —
+      # n8n cannot silently rewrite the committed files.
+      - ./n8n/workflows:/workflows:ro
+    extra_hosts:
+      # Lets the container reach the Next.js dev server on the host. Native on
+      # Docker Desktop; this line is what makes it work on Linux too.
+      - 'host.docker.internal:host-gateway'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q --spider http://localhost:5678/healthz || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  n8n-db-data:
+  n8n-data:

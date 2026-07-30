@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A new push supersedes an in-flight run on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @atwood/core test
+
+      - name: Build
+        run: pnpm --filter @atwood/web build
+        env:
+          # Placeholders: the build only needs these to exist so the client bundle
+          # can be produced. Nothing in CI talks to a real project.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+
+  database:
+    name: Migrations, RLS coverage, isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Postgres 16 with pgvector
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16 postgresql-16-pgvector
+
+      - name: Apply migrations and run the SQL suite
+        # Runs as the postgres user because initdb refuses to run as root.
+        # REQUIRE_VECTOR=1 fails rather than degrading — CI has pgvector, so a
+        # missing extension here would mean the install step silently broke.
+        run: |
+          sudo chmod -R a+rX "$GITHUB_WORKSPACE"
+          sudo -u postgres env \
+            PGBIN=/usr/lib/postgresql/16/bin \
+            REQUIRE_VECTOR=1 \
+            bash "$GITHUB_WORKSPACE/supabase/tests/validate_local.sh"
+
+  workflows:
+    name: n8n workflow JSON
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate workflow files
+        # Parses each workflow and checks every connection names a node that
+        # exists. A dangling reference imports without complaint and then fails at
+        # runtime, which is the worst time to find out.
+        run: |
+          python3 - <<'PY'
+          import json, glob, sys
+
+          failures = []
+          for path in sorted(glob.glob('n8n/workflows/*.json')):
+              try:
+                  workflow = json.load(open(path))
+                  names = {node['name'] for node in workflow['nodes']}
+                  for source, connection in workflow.get('connections', {}).items():
+                      if source not in names:
+                          failures.append(f'{path}: connection from unknown node {source!r}')
+                      for outputs in connection.get('main', []):
+                          for target in outputs:
+                              if target['node'] not in names:
+                                  failures.append(
+                                      f'{path}: connection to unknown node {target["node"]!r}'
+                                  )
+                  print(f'  ok   {path} ({len(workflow["nodes"])} nodes)')
+              except Exception as error:
+                  failures.append(f'{path}: {error}')
+
+          if failures:
+              print('\nFailures:', file=sys.stderr)
+              for failure in failures:
+                  print(f'  {failure}', file=sys.stderr)
+              sys.exit(1)
+
+          print('\nAll workflows valid.')
+          PY

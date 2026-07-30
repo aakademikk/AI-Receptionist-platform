@@ -1,0 +1,95 @@
+{
+  "name": "Atwood — 07 AI Response",
+  "nodes": [
+    {
+      "parameters": { "workflowInputs": { "values": [
+        { "name": "conversation_id", "type": "string" },
+        { "name": "business_id", "type": "string" },
+        { "name": "inbound_text", "type": "string" }
+      ] } },
+      "id": "trigger",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-320, 0],
+      "notes": "Composes a reply without sending it. Split out so a reply can be generated for review, replayed after a prompt change, or evaluated offline — none of which should text a customer."
+    },
+    {
+      "parameters": { "workflowId": { "__rl": true, "value": "Atwood — 04 Business Loader", "mode": "list" }, "workflowInputs": { "mappingMode": "defineBelow", "value": { "business_id": "={{ $json.business_id }}" } }, "options": {} },
+      "id": "load-business",
+      "name": "Business Loader",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [-100, -100]
+    },
+    {
+      "parameters": { "workflowId": { "__rl": true, "value": "Atwood — 06 Conversation Memory", "mode": "list" }, "workflowInputs": { "mappingMode": "defineBelow", "value": { "conversation_id": "={{ $('Called by another workflow').item.json.conversation_id }}" } }, "options": {} },
+      "id": "load-memory",
+      "name": "Conversation Memory",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [-100, 100]
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 }, "conditions": [
+          { "id": "ai-on", "leftValue": "={{ $('Conversation Memory').item.json.ai_enabled && $('Business Loader').item.json.context?.settings?.ai_enabled }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+        ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "ai-allowed",
+      "name": "Assistant still in charge?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [140, 0],
+      "notes": "A thread a colleague has taken over must not get an AI reply on top. Checked here as well as in the pipeline, because this workflow can be called on its own."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/messages/inbound",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to_number: $('Business Loader').item.json.context?.phone_numbers?.[0]?.e164, from_number: $('Conversation Memory').item.json.memory?.customer_phone, body: $('Called by another workflow').item.json.inbound_text, channel: $('Conversation Memory').item.json.memory?.channel }) }}",
+        "options": { "timeout": 120000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "generate",
+      "name": "Generate and send reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [380, -80],
+      "notes": "Prompt assembly, model selection and provider quirks live in packages/core, not in this workflow. Rebuilding the system prompt from n8n Set nodes would put the most quality-critical text in the codebase somewhere untestable and painful to review — and it would drift from the version the tests exercise."
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "skipped", "name": "skipped", "value": true, "type": "boolean" },
+        { "id": "why", "name": "reason", "value": "Assistant is muted for this conversation", "type": "string" }
+      ] }, "options": {} },
+      "id": "skipped",
+      "name": "Skipped",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [380, 120]
+    }
+  ],
+  "connections": {
+    "Called by another workflow": { "main": [[
+      { "node": "Business Loader", "type": "main", "index": 0 },
+      { "node": "Conversation Memory", "type": "main", "index": 0 }
+    ]] },
+    "Business Loader": { "main": [[{ "node": "Assistant still in charge?", "type": "main", "index": 0 }]] },
+    "Conversation Memory": { "main": [[{ "node": "Assistant still in charge?", "type": "main", "index": 0 }]] },
+    "Assistant still in charge?": { "main": [
+      [{ "node": "Generate and send reply", "type": "main", "index": 0 }],
+      [{ "node": "Skipped", "type": "main", "index": 0 }]
+    ] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all" },
+  "tags": [{ "name": "atwood" }, { "name": "ai" }],
+  "meta": { "description": "Loads context and memory in parallel, checks the assistant is still in charge, then generates the reply. Provider selection (Claude/GPT/Gemini) is per-tenant and resolved inside the API." }
+}

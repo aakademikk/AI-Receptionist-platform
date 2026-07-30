@@ -1,0 +1,80 @@
+{
+  "name": "Atwood — 09 Notification Engine",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
+      "id": "schedule",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-240, 0],
+      "notes": "Drains the notification outbox. Every minute is the right cadence: a handover alert that arrives 60 seconds late is fine, one that arrives 15 minutes late is not."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/notifications/drain",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ limit: 50 }) }}",
+        "options": { "timeout": 120000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "drain",
+      "name": "Drain the outbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0],
+      "notes": "Claims a batch with FOR UPDATE SKIP LOCKED, so overlapping runs take disjoint batches rather than double-sending. That makes a slow run safe to overlap with the next tick — no lock file, no singleton flag."
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 }, "conditions": [
+          { "id": "failures", "leftValue": "={{ $json.failed || 0 }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }
+        ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "any-failures",
+      "name": "Any failures?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Surface delivery failures in the execution log. A row that fails five times\n// stops being claimed and would otherwise sit in the outbox unnoticed — an owner\n// who never got told about a lead has no way to know a notification existed.\nconst { claimed = 0, sent = 0, failed = 0, suppressed = 0 } = $input.first().json;\n\nconsole.warn(JSON.stringify({\n  level: 'warn',\n  message: 'Notification delivery failures in this batch',\n  claimed, sent, failed, suppressed,\n  execution_id: $execution.id,\n}));\n\nreturn [{ json: { claimed, sent, failed, suppressed, needs_attention: failed > 0 } }];"
+      },
+      "id": "log-failures",
+      "name": "Log failures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, -80]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "sent", "name": "sent", "value": "={{ $json.sent || 0 }}", "type": "number" },
+        { "id": "claimed", "name": "claimed", "value": "={{ $json.claimed || 0 }}", "type": "number" }
+      ] }, "options": {} },
+      "id": "clean",
+      "name": "Clean run",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 100]
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "Drain the outbox", "type": "main", "index": 0 }]] },
+    "Drain the outbox": { "main": [[{ "node": "Any failures?", "type": "main", "index": 0 }]] },
+    "Any failures?": { "main": [
+      [{ "node": "Log failures", "type": "main", "index": 0 }],
+      [{ "node": "Clean run", "type": "main", "index": 0 }]
+    ] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "none" },
+  "tags": [{ "name": "atwood" }, { "name": "scheduled" }],
+  "meta": { "description": "Delivers queued notifications across email, SMS, WhatsApp, webhook and Slack. Dashboard notifications need no delivery — the dashboard reads the table.\n\nsaveDataSuccessExecution=none: this runs 1,440 times a day and successful runs are noise. Failures are kept." }
+}

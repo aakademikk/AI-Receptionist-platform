@@ -1,0 +1,186 @@
+{
+  "name": "Atwood — 02 Incoming Message",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "atwood/incoming-message",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-incoming-message",
+      "name": "Inbound Message Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-380, 0],
+      "webhookId": "atwood-incoming-message",
+      "notes": "Receives {to_number, from_number, body, channel, provider_message_id} from the Next.js SMS webhook (which has already verified the Twilio signature).\n\nresponseMode=responseNode so we can acknowledge immediately and let the pipeline run on — the model call takes seconds and the caller must not wait on it."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "secret",
+              "leftValue": "={{ $json.headers?.['x-atwood-secret'] || '' }}",
+              "rightValue": "={{ $env.INTERNAL_API_SECRET }}",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "verify-secret",
+      "name": "Verify Shared Secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-160, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: true, execution_id: $execution.id }) }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "ack",
+      "name": "Acknowledge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [60, -140],
+      "notes": "202 straight back. The customer's reply is generated after this, which keeps us clear of Twilio's 15s webhook timeout — a timeout would make Twilio retry, and a retry arriving mid-generation is how a customer ends up with two different answers."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/messages/inbound",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+            { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to_number: $('Inbound Message Webhook').item.json.body.to_number, from_number: $('Inbound Message Webhook').item.json.body.from_number, body: $('Inbound Message Webhook').item.json.body.body, channel: $('Inbound Message Webhook').item.json.body.channel, provider_message_id: $('Inbound Message Webhook').item.json.body.provider_message_id }) }}",
+        "options": {
+          "timeout": 120000,
+          "response": { "response": { "neverError": true, "responseFormat": "json" } }
+        }
+      },
+      "id": "conversation-pipeline",
+      "name": "Conversation Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 60],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "notes": "Records the message, checks escalation rules, generates the reply, extracts the lead, notifies the owner, sends the SMS.\n\nOnly 2 tries: idempotency makes a retry safe, but a reply that lands 90 seconds late is worse than one that never lands — a stale answer confuses the customer. Two attempts then escalate.\n\n120s timeout covers a slow model call at high effort."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "failed",
+              "leftValue": "={{ $json.error !== undefined }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "did-fail",
+      "name": "Pipeline Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [500, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/conversations/{{ $json.conversation_id || 'unknown' }}/handover",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ reason: 'ai_error', note: 'The assistant could not generate a reply after two attempts: ' + ($json.error?.message || 'unknown error') }) }}",
+        "options": { "timeout": 20000, "response": { "response": { "neverError": true } } }
+      },
+      "id": "escalate-on-failure",
+      "name": "Escalate to a Person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 160],
+      "notes": "The failure mode that matters. If the assistant cannot answer, a customer is sitting there having had no reply — so a technical failure becomes a human handover rather than silence.\n\nThe conversation_id is present even on most failures, because the pipeline records the inbound message before it does anything that can fail."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "ok", "name": "ok", "value": true, "type": "boolean" },
+            { "id": "conv", "name": "conversation_id", "value": "={{ $json.conversation_id }}", "type": "string" },
+            { "id": "sent", "name": "reply_sent", "value": "={{ $json.reply_sent }}", "type": "boolean" },
+            { "id": "handover", "name": "handover", "value": "={{ JSON.stringify($json.handover) }}", "type": "string" },
+            { "id": "lead", "name": "lead", "value": "={{ JSON.stringify($json.lead) }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "done",
+      "name": "Done",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, -40]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: false, reason: 'invalid shared secret' }) }}",
+        "options": { "responseCode": 401 }
+      },
+      "id": "reject",
+      "name": "Reject",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [60, 200]
+    }
+  ],
+  "connections": {
+    "Inbound Message Webhook": { "main": [[{ "node": "Verify Shared Secret", "type": "main", "index": 0 }]] },
+    "Verify Shared Secret": {
+      "main": [
+        [
+          { "node": "Acknowledge", "type": "main", "index": 0 },
+          { "node": "Conversation Pipeline", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Reject", "type": "main", "index": 0 }]
+      ]
+    },
+    "Conversation Pipeline": { "main": [[{ "node": "Pipeline Failed?", "type": "main", "index": 0 }]] },
+    "Pipeline Failed?": {
+      "main": [
+        [{ "node": "Escalate to a Person", "type": "main", "index": 0 }],
+        [{ "node": "Done", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "tags": [{ "name": "atwood" }, { "name": "inbound" }],
+  "meta": {
+    "description": "Customer replies → assistant answers.\n\nAcknowledges the webhook immediately, then runs the pipeline. If generation fails twice the conversation is escalated to a human rather than left silent."
+  }
+}

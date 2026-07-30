@@ -1,0 +1,51 @@
+{
+  "name": "Atwood — 06 Conversation Memory",
+  "nodes": [
+    {
+      "parameters": { "workflowInputs": { "values": [{ "name": "conversation_id", "type": "string" }] } },
+      "id": "trigger",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-220, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/conversations/{{ $json.conversation_id }}/memory",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }] },
+        "options": { "timeout": 20000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "load",
+      "name": "Load memory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [20, 0],
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": { "assignments": { "assignments": [
+        { "id": "m", "name": "memory", "value": "={{ $json.memory }}", "type": "object" },
+        { "id": "status", "name": "status", "value": "={{ $json.memory?.status }}", "type": "string" },
+        { "id": "ai", "name": "ai_enabled", "value": "={{ $json.memory?.ai_enabled === true }}", "type": "boolean" },
+        { "id": "turns", "name": "ai_turn_count", "value": "={{ $json.memory?.ai_turn_count || 0 }}", "type": "number" },
+        { "id": "known", "name": "known", "value": "={{ $json.memory?.known }}", "type": "object" },
+        { "id": "summary", "name": "summary", "value": "={{ $json.memory?.summary || '' }}", "type": "string" }
+      ] }, "options": {} },
+      "id": "flatten",
+      "name": "Flatten for branching",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [260, 0],
+      "notes": "`known` is the field that earns this workflow its keep: it is what stops the assistant asking for a postcode it was given four messages ago."
+    }
+  ],
+  "connections": {
+    "Called by another workflow": { "main": [[{ "node": "Load memory", "type": "main", "index": 0 }]] },
+    "Load memory": { "main": [[{ "node": "Flatten for branching", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "atwood" }, { "name": "shared" }],
+  "meta": { "description": "Loads the recent transcript, the rolling summary, current topic, lead status and known lead fields. Long threads are compacted into a summary so the prompt does not grow without bound." }
+}

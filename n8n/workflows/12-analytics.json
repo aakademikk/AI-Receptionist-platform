@@ -1,0 +1,74 @@
+{
+  "name": "Atwood — 12 Analytics",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "15 2 * * *" }] } },
+      "id": "schedule",
+      "name": "Nightly at 02:15 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-240, 0],
+      "notes": "02:15 UTC, not midnight: tenants span timezones, so this must run late enough that yesterday has closed for the westernmost tenant. The SQL evaluates each day boundary in the tenant's own timezone, so a single run seals the right 24 hours for a business in Leeds and one in Sydney."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/analytics/rollup",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [
+          { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+          { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+        ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={}",
+        "options": { "timeout": 600000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "rollup",
+      "name": "Roll up every tenant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 60000,
+      "notes": "Empty body = every active tenant, yesterday. Idempotent (upsert on business_id+day), so a retry recomputes rather than double-counting.\n\n10 minute timeout: this is a batch job, not a request path."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/maintenance/purge",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ batch_limit: 5000 }) }}",
+        "options": { "timeout": 600000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+      },
+      "id": "purge",
+      "name": "Retention sweep",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0],
+      "notes": "Enforces each tenant's data_retention_days. A documented retention period only means something if something actually deletes.\n\nBatched at 5,000 rows per table per night so an unbounded delete never holds locks long enough to affect live traffic; the schedule catches up over successive nights."
+    },
+    {
+      "parameters": {
+        "jsCode": "// One structured line per nightly run — the record of whether the batch job did\n// its job, queryable in the log aggregator alongside everything else.\nconst rollup = $('Roll up every tenant').first().json;\nconst purge = $input.first().json;\n\nconst summary = {\n  level: rollup.error || purge.error ? 'error' : 'info',\n  message: 'Nightly analytics and retention run',\n  businesses_rolled_up: rollup.businesses_rolled_up ?? 0,\n  rollup_error: rollup.error?.message ?? null,\n  purge_result: purge.result ?? null,\n  purge_error: purge.error?.message ?? null,\n  execution_id: $execution.id,\n};\n\nconsole.log(JSON.stringify(summary));\nreturn [{ json: summary }];"
+      },
+      "id": "summarise",
+      "name": "Log the run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "Nightly at 02:15 UTC": { "main": [[{ "node": "Roll up every tenant", "type": "main", "index": 0 }]] },
+    "Roll up every tenant": { "main": [[{ "node": "Retention sweep", "type": "main", "index": 0 }]] },
+    "Retention sweep": { "main": [[{ "node": "Log the run", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all" },
+  "tags": [{ "name": "atwood" }, { "name": "scheduled" }],
+  "meta": { "description": "Seals yesterday's metrics into analytics_daily so trend queries never scan the message log, then runs the GDPR retention sweep. Sequential on purpose — rolling up before deleting means the aggregates survive the data they came from." }
+}

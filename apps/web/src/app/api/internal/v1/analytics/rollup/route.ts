@@ -20,7 +20,10 @@ import { assertBusinessScope, readJson, withInternalAuth } from '@/lib/internal-
  * in Sydney.
  */
 export const POST = withInternalAuth(async (request, auth) => {
-  const body = await readJson<{ business_id?: unknown; day?: unknown }>(request).catch(() => ({}));
+  // An empty body is valid — it means "roll up every tenant for yesterday" — so a
+  // missing or unparseable body degrades to defaults rather than a 400.
+  type Body = { business_id?: unknown; day?: unknown };
+  const body: Body = await readJson<Body>(request).catch(() => ({}) as Body);
 
   const day = typeof body.day === 'string' ? body.day : null;
   if (day !== null && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {

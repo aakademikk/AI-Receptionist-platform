@@ -1,0 +1,172 @@
+{
+  "name": "Atwood — 01 Incoming Call",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "atwood/incoming-call",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-incoming-call",
+      "name": "Missed Call Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-320, 0],
+      "webhookId": "atwood-incoming-call",
+      "notes": "Receives {to_number, from_number, call_sid, call_status, started_at} from the Twilio voice action callback. Not called by Twilio directly: the Next.js route verifies the X-Twilio-Signature first, so this endpoint only ever sees traffic our own edge has authenticated."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "secret-present",
+              "leftValue": "={{ $json.headers?.['x-atwood-secret'] || '' }}",
+              "rightValue": "={{ $env.INTERNAL_API_SECRET }}",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "verify-secret",
+      "name": "Verify Shared Secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-100, 0],
+      "notes": "n8n webhooks are unauthenticated by default. Without this check anyone who learns the path can make the platform send SMS on a tenant's behalf and bill them for it."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ATWOOD_API_URL }}/api/internal/v1/calls/missed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-atwood-secret", "value": "={{ $env.INTERNAL_API_SECRET }}" },
+            { "name": "x-atwood-trace-id", "value": "=atw_n8n_{{ $execution.id }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ to_number: $json.body.to_number, from_number: $json.body.from_number, call_sid: $json.body.call_sid, call_status: $json.body.call_status, started_at: $json.body.started_at }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": { "response": { "neverError": true, "responseFormat": "json" } }
+        }
+      },
+      "id": "call-missed-pipeline",
+      "name": "Missed Call Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [140, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "notes": "One call does everything: routes the number to a tenant, opens the conversation, records the call, sends the branded SMS, alerts the owner. Idempotent on call_sid, which is why retrying is safe — a retry cannot text the customer twice.\n\nneverError=true so a 4xx reaches the branch below as data instead of failing the execution; retries then apply only to genuine 5xx/network faults."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "status-ok",
+              "leftValue": "={{ $json.error === undefined }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-result",
+      "name": "Succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [360, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "ok", "name": "ok", "value": true, "type": "boolean" },
+            { "id": "conversation", "name": "conversation_id", "value": "={{ $json.conversation_id }}", "type": "string" },
+            { "id": "sms", "name": "sms_sent", "value": "={{ $json.sms_sent }}", "type": "boolean" },
+            { "id": "trace", "name": "trace_id", "value": "={{ $json.trace_id }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Done",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [580, -100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "ok", "name": "ok", "value": false, "type": "boolean" },
+            { "id": "code", "name": "code", "value": "={{ $json.error?.code || 'unknown' }}", "type": "string" },
+            { "id": "message", "name": "message", "value": "={{ $json.error?.message || 'Missed call pipeline failed' }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "respond-failed",
+      "name": "Failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [580, 100],
+      "notes": "Terminates visibly rather than silently. The execution shows up red in n8n's list, which is the whole reason the orchestration lives here rather than in a fire-and-forget function."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "ok", "name": "ok", "value": false, "type": "boolean" },
+            { "id": "message", "name": "message", "value": "Rejected: invalid or missing shared secret", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "respond-unauthorized",
+      "name": "Rejected",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [140, 200]
+    }
+  ],
+  "connections": {
+    "Missed Call Webhook": { "main": [[{ "node": "Verify Shared Secret", "type": "main", "index": 0 }]] },
+    "Verify Shared Secret": {
+      "main": [
+        [{ "node": "Missed Call Pipeline", "type": "main", "index": 0 }],
+        [{ "node": "Rejected", "type": "main", "index": 0 }]
+      ]
+    },
+    "Missed Call Pipeline": { "main": [[{ "node": "Succeeded?", "type": "main", "index": 0 }]] },
+    "Succeeded?": {
+      "main": [
+        [{ "node": "Done", "type": "main", "index": 0 }],
+        [{ "node": "Failed", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "tags": [{ "name": "atwood" }, { "name": "inbound" }],
+  "meta": {
+    "description": "Missed call → branded SMS. Entry point for the voice path.\n\nTwilio hits the Next.js voice webhook (which verifies the signature and answers with TwiML inside Twilio's timeout); that route hands the missed-call event here. This workflow adds retries, an execution history, and a visible failure surface."
+  }
+}
