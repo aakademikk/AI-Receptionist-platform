@@ -15,7 +15,12 @@ without a daemon the CLI fails with `failed to connect to the docker API`.
 ```bash
 git clone <repo> && cd atwood-systems
 pnpm install
-cp .env.example .env.local && cp .env.example .env   # .env is for docker compose
+
+# apps/web/.env.local is read by the app; the root .env by docker compose.
+# A .env.local at the repo root is read by nothing — Next.js loads env files from
+# the app directory only, so a copy left at the root looks configured and is inert.
+cp .env.example apps/web/.env.local
+cp .env.example .env
 ```
 
 Generate the two secrets that have no sensible default:
@@ -37,6 +42,10 @@ pnpm db:reset     # migrations + seed
 
 `pnpm exec supabase status` prints the values; copy all three into `.env.local` and
 `.env` rather than typing them.
+
+`pnpm env:check` then confirms what the app resolves, including the mistakes that are
+invisible in an editor: a duplicate key overriding the line you just fixed, a
+publishable key in the service-role slot, or an env file in a directory nothing reads.
 
 Recent CLI versions renamed the keys, so the labels do not match the variable names:
 

@@ -127,16 +127,27 @@ Studio as containers, and without a running daemon it fails with
 
 ```bash
 pnpm install
-cp .env.example .env.local && cp .env.example .env   # .env is for docker compose
+
+# The app reads apps/web/.env.local — NOT a .env.local at the repo root, which
+# Next.js does not look at. Docker compose reads the root .env.
+cp .env.example apps/web/.env.local
+cp .env.example .env
 
 openssl rand -base64 48                              # INTERNAL_API_SECRET, N8N_ENCRYPTION_KEY
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"  # CREDENTIAL_ENCRYPTION_KEY
 
-pnpm db:start        # prints the API URL and both keys — copy them into .env.local
+pnpm db:start        # prints the Project URL and keys — copy them in (table below)
+pnpm env:check       # confirms the app resolves what you think it does
 pnpm db:reset        # migrations + seed
 pnpm dev             # http://localhost:3000
 pnpm n8n:up          # optional; http://localhost:5678
 ```
+
+`pnpm env:check` exists because every misconfiguration here shows up somewhere
+unhelpful — a wrong URL as a JSON parse error at sign-in, a file in the wrong
+directory as a missing variable you can plainly see. It resolves the files exactly as
+Next.js does and reports what the app will actually see, masking secrets. Run it
+before `pnpm dev` whenever something looks wrong.
 
 **Take the three Supabase values from `pnpm exec supabase status`**, rather than
 typing them. Recent CLI versions label them differently from the variable names here:
