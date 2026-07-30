@@ -35,13 +35,27 @@ pnpm db:start     # supabase start — Postgres, GoTrue, PostgREST, Realtime, St
 pnpm db:reset     # migrations + seed
 ```
 
-`db:start` prints the API URL and the anon and service-role keys; copy all three into
-`.env.local` and `.env` rather than typing them.
+`pnpm exec supabase status` prints the values; copy all three into `.env.local` and
+`.env` rather than typing them.
 
-**Use the `API URL` line, which is port 54321.** Studio is on 54323 and serves a web
-page, so a client pointed at it parses HTML as JSON. The app now rejects that URL at
-boot with the port to use instead, but the reason it needed to is that the Studio URL
-is the one you have open in a browser.
+Recent CLI versions renamed the keys, so the labels do not match the variable names:
+
+| `supabase status` | Variable |
+|---|---|
+| `Project URL` | `NEXT_PUBLIC_SUPABASE_URL` |
+| `Publishable` — `sb_publishable_…` (was `anon key`) | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| `Secret` — `sb_secret_…` (was `service_role key`) | `SUPABASE_SERVICE_ROLE_KEY` |
+
+Both formats work. `supabase-js` recognises the `sb_`-prefixed keys and sends them in
+the `apikey` header rather than as a bearer token, because they are not JWTs; nothing
+in this codebase treats a key as one.
+
+**Use `Project URL` — port 54321.** Three nearby URLs are not the API and all of them
+get pasted by mistake: Studio (54323), the Storage (S3) URL ending `/storage/v1/s3`
+in that same output, and `supabase.com/dashboard/project/<ref>` from the browser. Each
+serves a web page, which a client parses as JSON and reports as
+`Unexpected token '<'`. The app now rejects all three at boot naming the correct URL —
+for the dashboard case it derives it from the project ref.
 
 Then:
 

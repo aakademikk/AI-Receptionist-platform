@@ -138,10 +138,19 @@ pnpm dev             # http://localhost:3000
 pnpm n8n:up          # optional; http://localhost:5678
 ```
 
-**Take the three Supabase values from what `pnpm db:start` prints**, rather than
-typing them. The API is on **54321**; `54323` is Studio and serves a web page, so
-pasting it produces a sign-in error about invalid JSON rather than anything about
-the URL.
+**Take the three Supabase values from `pnpm exec supabase status`**, rather than
+typing them. Recent CLI versions label them differently from the variable names here:
+
+| `supabase status` | `.env.local` |
+|---|---|
+| **Project URL** (`http://127.0.0.1:54321`) | `NEXT_PUBLIC_SUPABASE_URL` |
+| **Publishable** `sb_publishable_…` (older CLIs: `anon key`) | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| **Secret** `sb_secret_…` (older CLIs: `service_role key`) | `SUPABASE_SERVICE_ROLE_KEY` |
+
+Use the **Project URL**. Three other URLs in that output and in your browser are not
+the API — Studio (54323), the Storage (S3) URL ending in `/storage/v1/s3`, and the
+`supabase.com/dashboard/project/…` address. The app rejects all three at boot and
+names the one to use, but they are easy to grab by accident.
 
 Sign in at `/login` as `dev@atwood.systems`. The magic link is never really sent
 locally — read it at `http://localhost:54324`. The seed ships Parkfords Property
