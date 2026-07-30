@@ -1,0 +1,124 @@
+@import 'tailwindcss';
+
+/**
+ * Design tokens.
+ *
+ * The important rule in this file, and the one that keeps a white-label product
+ * legible: there are **two colour systems and they never mix**.
+ *
+ *   --brand-*   The tenant's own colours. Applied to chrome only — nav, primary
+ *               buttons, links, focus rings, logo lockup. Set at runtime from
+ *               business_profiles, so its value is unknown at build time and
+ *               cannot be checked for contrast or colourblind separation.
+ *
+ *   --series-*  Data marks. A fixed, validated categorical palette, identical for
+ *               every tenant.
+ *
+ * Using the tenant's brand colour for data would mean a chart whose accessibility
+ * depends on what a customer typed into a colour picker — one tenant's pale yellow
+ * accent would produce an unreadable bar against the surface, and a two-series
+ * chart could end up with two indistinguishable hues. Chrome can absorb an
+ * eccentric brand colour; an encoding cannot.
+ *
+ * The series values below are slots 1 and 2 of the reference categorical palette,
+ * validated for both modes (all-pairs: CVD ΔE 24.7 light / 26.8 dark; normal-vision
+ * 33.6 / 31.8; all ≥ 3:1 against their surface).
+ */
+
+@theme {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+
+  /* Surfaces and ink */
+  --surface-0: #f7f7f6;
+  --surface-1: #fcfcfb;
+  --surface-2: #f1f1ef;
+  --border-subtle: #e3e3df;
+  --border-strong: #cdcdc7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7a7975;
+
+  /* Data marks — fixed across all tenants. */
+  --series-1: #2a78d6; /* AI-handled */
+  --series-2: #eb6834; /* human-handled */
+
+  /* Status. Reserved; never reused as a series colour. */
+  --status-good: #008300;
+  --status-warning: #eda100;
+  --status-critical: #e34948;
+
+  /* Tenant brand. These defaults are replaced inline per tenant. */
+  --brand-primary: #0f172a;
+  --brand-accent: #2563eb;
+  --brand-foreground: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border-subtle: #302f2d;
+    --border-strong: #45443f;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #97968c;
+
+    /* Re-stepped for the dark surface, not an automatic flip of the light values. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+
+    --status-good: #008300;
+    --status-warning: #c98500;
+    --status-critical: #e66767;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-0: #111110;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --border-subtle: #302f2d;
+  --border-strong: #45443f;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #97968c;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+
+  --status-good: #008300;
+  --status-warning: #c98500;
+  --status-critical: #e66767;
+}
+
+html,
+body {
+  background: var(--surface-0);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A single visible focus treatment, in the tenant's accent. */
+:focus-visible {
+  outline: 2px solid var(--brand-accent);
+  outline-offset: 2px;
+}
+
+/* Tabular figures everywhere a number is compared against another number. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

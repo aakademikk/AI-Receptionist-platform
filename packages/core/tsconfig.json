@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The package is consumed as TypeScript source (Next.js transpiles it via
+    // `transpilePackages`), so there is no build step and no emit. That is what
+    // allows the explicit `.ts` import specifiers, which in turn keep the source
+    // runnable directly under `node --experimental-strip-types` for tests.
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}
