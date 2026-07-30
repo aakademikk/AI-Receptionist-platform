@@ -192,11 +192,22 @@ export function validateTwilioSignature(input: {
   return timingSafeEqual(presented, computed);
 }
 
-/** Throwing wrapper for route handlers. */
+/**
+ * Throwing wrapper for route handlers.
+ *
+ * 403 rather than 401: the caller did present a credential, it simply did not
+ * verify, and there is no challenge we could return that would help it try again.
+ * It is also what Twilio's own helper libraries answer, so the status matches what
+ * anyone debugging against their docs will expect.
+ *
+ * The route must map this to a response — `withTwilioWebhook` does. An unmapped
+ * throw becomes a 500, which tells Twilio to *retry* a request that can never
+ * succeed.
+ */
 export function requireValidTwilioSignature(input: Parameters<typeof validateTwilioSignature>[0]): void {
   if (!validateTwilioSignature(input)) {
     logger.warn('Rejected a Twilio webhook with an invalid signature', { url: input.url });
-    throw new AppError('unauthorized', 401, 'Invalid Twilio signature', {
+    throw new AppError('forbidden', 403, 'Invalid Twilio signature', {
       publicMessage: 'Signature verification failed.',
     });
   }

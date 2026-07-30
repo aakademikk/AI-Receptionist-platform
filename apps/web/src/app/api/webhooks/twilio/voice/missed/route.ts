@@ -9,7 +9,7 @@ import {
   serverEnv,
 } from '@atwood/core';
 
-import { reconstructUrl } from '../route';
+import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/webhooks/twilio/voice/missed
@@ -25,7 +25,7 @@ import { reconstructUrl } from '../route';
  * up or is listening to dead air; making them wait on an AI call and an SMS send
  * would be both pointless and, on Twilio's 15-second webhook timeout, a failure.
  */
-export async function POST(request: Request): Promise<Response> {
+export const POST = withTwilioWebhook(async (request: Request): Promise<Response> => {
   const raw = await request.text();
   const params = parseTwilioForm(raw);
   const url = reconstructUrl(request);
@@ -106,7 +106,7 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   return twiml(buildHangupTwiml());
-}
+});
 
 function twiml(body: string): Response {
   return new Response(body, {

@@ -8,7 +8,7 @@ import {
   serverEnv,
 } from '@atwood/core';
 
-import { reconstructUrl } from '../voice/route';
+import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/webhooks/twilio/sms
@@ -25,7 +25,7 @@ import { reconstructUrl } from '../voice/route';
  * API instead, so that it is recorded, priced and idempotency-keyed like every other
  * outbound message.
  */
-export async function POST(request: Request): Promise<Response> {
+export const POST = withTwilioWebhook(async (request: Request): Promise<Response> => {
   const raw = await request.text();
   const params = parseTwilioForm(raw);
   const url = reconstructUrl(request);
@@ -87,4 +87,4 @@ export async function POST(request: Request): Promise<Response> {
     status: 200,
     headers: { 'content-type': 'text/xml; charset=utf-8' },
   });
-}
+});

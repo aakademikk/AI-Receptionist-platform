@@ -8,6 +8,8 @@ import {
   requireValidTwilioSignature,
 } from '@atwood/core';
 
+import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
+
 /**
  * POST /api/webhooks/twilio/voice
  *
@@ -23,7 +25,7 @@ import {
  * until it does — so it does the minimum: verify, resolve the number, return TwiML.
  * Everything else happens on the action callback.
  */
-export async function POST(request: Request): Promise<Response> {
+export const POST = withTwilioWebhook(async (request: Request): Promise<Response> => {
   const raw = await request.text();
   const params = parseTwilioForm(raw);
 
@@ -84,30 +86,11 @@ export async function POST(request: Request): Promise<Response> {
       timeoutSeconds: 20,
     }),
   );
-}
+});
 
 function twiml(body: string): Response {
   return new Response(body, {
     status: 200,
     headers: { 'content-type': 'text/xml; charset=utf-8' },
   });
-}
-
-/**
- * Rebuild the URL Twilio signed.
- *
- * Vercel and most proxies terminate TLS and forward the original scheme and host in
- * `x-forwarded-*`. Without honouring those, the signature payload differs from what
- * Twilio hashed and every request is rejected — a failure that looks like a bad
- * auth token rather than a proxy detail.
- */
-export function reconstructUrl(request: Request): string {
-  const original = new URL(request.url);
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  const forwardedHost = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-
-  if (forwardedProto) original.protocol = `${forwardedProto.split(',')[0]!.trim()}:`;
-  if (forwardedHost) original.host = forwardedHost.split(',')[0]!.trim();
-
-  return original.toString();
 }

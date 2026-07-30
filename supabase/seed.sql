@@ -10,7 +10,9 @@
 -- can dial a real person.
 -- =============================================================================
 
--- A dev login: dev@atwood.systems / password (via Supabase Studio or the app).
+-- A dev login: dev@atwood.systems. Sign in at /login — the app is magic-link only,
+-- so there is no password here; the link is caught by Inbucket on :54324 locally.
+-- email_confirmed_at is set so GoTrue treats the address as already verified.
 insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
 values (
   '00000000-0000-4000-8000-000000000001',

@@ -6,7 +6,7 @@ import {
   requireValidTwilioSignature,
 } from '@atwood/core';
 
-import { reconstructUrl } from '../voice/route';
+import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/webhooks/twilio/status
@@ -22,7 +22,7 @@ import { reconstructUrl } from '../voice/route';
  * Updates by `provider_message_id`. Receipts arrive out of order, so a terminal
  * state is never overwritten by a late-arriving intermediate one.
  */
-export async function POST(request: Request): Promise<Response> {
+export const POST = withTwilioWebhook(async (request: Request): Promise<Response> => {
   const raw = await request.text();
   const params = parseTwilioForm(raw);
 
@@ -85,4 +85,4 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   return new Response(null, { status: 204 });
-}
+});
