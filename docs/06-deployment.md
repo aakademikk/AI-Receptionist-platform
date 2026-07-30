@@ -129,6 +129,68 @@ For local development, expose port 3000 with a tunnel and use that hostname —
 `cloudflared tunnel --url http://localhost:3000` or ngrok. Signature verification
 honours `x-forwarded-proto`, so a TLS-terminating tunnel works without changes.
 
+### Runbook: a real number against your laptop
+
+The order matters — a number pointed at a tunnel that is not running gives Twilio a
+failed webhook and you an empty log.
+
+**1. Choose the model, and set both pairs.** `business_settings` carries two provider
+columns, one for the reply and one for lead extraction. Switching only the first
+leaves extraction calling the old provider, which then fails for want of an API key —
+and because extraction is deliberately non-fatal, the symptom is a working assistant
+that never produces a lead. Set them together:
+
+```sql
+update public.business_settings set
+  ai_provider        = 'google',
+  ai_model           = 'gemini-2.5-flash',
+  extraction_provider = 'google',
+  extraction_model   = 'gemini-2.5-flash'
+where business_id = '<business-uuid>';
+```
+
+**2. Point the tenant's number at the real one.**
+
+```sql
+update public.phone_numbers set
+  e164       = '+44XXXXXXXXXX',   -- the Twilio number, E.164
+  forward_to = null               -- see below
+where business_id = '<business-uuid>' and is_primary = true;
+```
+
+`forward_to = null` makes every call missed immediately: the TwiML is a `<Redirect>`
+straight to the missed-call handler rather than a `<Dial>` that has to ring out first.
+That is the fastest way to see the follow-up SMS, and a legitimate permanent
+configuration for an SMS-first business. Set it to a real mobile when you want the
+forward-then-fall-back behaviour.
+
+**3. Start the tunnel, then configure Twilio** — in that order, so the URL exists
+before Twilio is told about it.
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+| Twilio console field | Value |
+|---|---|
+| Voice → A call comes in | `POST https://<tunnel>/api/webhooks/twilio/voice` |
+| Messaging → A message comes in | `POST https://<tunnel>/api/webhooks/twilio/sms` |
+
+Leave `NEXT_PUBLIC_APP_URL` as `http://localhost:3000`. It governs magic-link
+redirects, not webhooks — the status callback is derived from the inbound request's
+own origin, so it follows the tunnel automatically. Changing it would break sign-in
+unless the tunnel host is also added to `additional_redirect_urls` in
+`supabase/config.toml`.
+
+**4. Watch it.** A text to the number should appear in the conversation view within a
+second or two, with the reply following it. If nothing arrives, Twilio's Monitor →
+Logs → Errors names the failure — a 403 there means the auth token in `.env.local`
+does not match the account that owns the number.
+
+**Trial accounts** can only message numbers verified in the console. A reply that
+Twilio accepts and never delivers, with error 21608 in the logs, is that limit rather
+than a bug here.
+
 WhatsApp needs a separate `phone_numbers` row with `channels =
 array['whatsapp']`, pointed at the same webhook.
 
