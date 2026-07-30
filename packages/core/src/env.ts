@@ -65,10 +65,14 @@ function integer(name: string, fallback: number): number {
  * nothing about the actual mistake, and which arrives at sign-in rather than at
  * boot. These checks fail earlier and name the fix.
  *
- * Deliberately narrow. Self-hosted Supabase lives on any host and port, so this
- * rejects only what cannot be right: the placeholder shipped in `.env.example`, and
- * the Studio port — which is the URL you have in your browser and therefore the one
- * most likely to be pasted, while the API is on 54321.
+ * Deliberately narrow. Self-hosted Supabase lives on any host and port behind any
+ * reverse proxy, so this rejects only what cannot be right — and where the correct
+ * value is derivable, it names it, because "wrong URL" is a far less useful message
+ * than "use this one".
+ *
+ * Every case here is one someone has actually hit. They share a cause: the URLs a
+ * human has to hand — the browser address bar, the storage section of
+ * `supabase start` output — are not the API root.
  */
 function assertSupabaseApiUrl(value: string): string {
   let parsed: URL;
@@ -89,11 +93,46 @@ function assertSupabaseApiUrl(value: string): string {
     );
   }
 
+  // The dashboard URL. This is the one in the address bar while you are looking for
+  // the API URL, and the project ref in its path is exactly what the API hostname is
+  // built from — so the right answer can be handed over rather than described.
+  if (parsed.hostname === 'supabase.com' || parsed.hostname === 'www.supabase.com') {
+    const ref = /\/dashboard\/project\/([a-z0-9]+)/i.exec(parsed.pathname)?.[1];
+    throw new ConfigError(
+      'NEXT_PUBLIC_SUPABASE_URL is the Supabase dashboard, which is a web page rather ' +
+        'than your project API. ' +
+        (ref
+          ? `For this project the API URL is https://${ref}.supabase.co`
+          : 'Use the Project URL from Project Settings → API, which looks like ' +
+            'https://<ref>.supabase.co.') +
+        '. Note a hosted project has none of this repo\'s migrations applied — ' +
+        '`pnpm db:start` plus `pnpm db:reset` gives you the seeded local stack instead.',
+    );
+  }
+
   if (parsed.port === '54323') {
     throw new ConfigError(
       'NEXT_PUBLIC_SUPABASE_URL points at Supabase Studio (port 54323), which serves ' +
         'a web page rather than the API. Use the API URL instead: ' +
         `${parsed.protocol}//${parsed.hostname}:54321`,
+    );
+  }
+
+  /*
+   * A sub-API path rather than the API root. `supabase start` prints an "API URL"
+   * under its S3 storage section that ends in /storage/v1/s3, and it is easy to take
+   * that for the API URL because it is literally labelled one. The client appends
+   * /auth/v1/... to whatever it is given, so the result 404s as HTML.
+   *
+   * Matching specific known sub-paths rather than "any path", because a self-hosted
+   * instance behind a path prefix is legitimate.
+   */
+  const subApi = /^\/(storage|auth|rest|realtime|functions)\/v\d/.exec(parsed.pathname);
+  if (subApi) {
+    throw new ConfigError(
+      `NEXT_PUBLIC_SUPABASE_URL includes the "${subApi[1]}" sub-API path ` +
+        `("${parsed.pathname}"). The client appends its own paths, so it needs the ` +
+        `root only: ${parsed.origin}`,
     );
   }
 
