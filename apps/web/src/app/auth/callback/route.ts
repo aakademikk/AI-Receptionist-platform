@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { explainAuthError, publicEnv } from '@atwood/core';
+
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -25,8 +27,9 @@ export async function GET(request: Request): Promise<Response> {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
+    const message = explainAuthError(error.message, publicEnv.supabaseUrl);
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error.message)}`, url.origin),
+      new URL(`/login?error=${encodeURIComponent(message)}`, url.origin),
     );
   }
 

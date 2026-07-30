@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 
+import { explainAuthError, publicEnv } from '@atwood/core';
+
 import { Card } from '@/components/ui';
 import { createClient, getCurrentUser } from '@/lib/supabase/server';
 
@@ -43,7 +45,10 @@ export default async function LoginPage({
     });
 
     if (signInError) {
-      redirect(`/login?error=${encodeURIComponent(signInError.message)}`);
+      // A misconfigured Supabase URL arrives here as a JSON parse error, which tells
+      // the reader nothing. Translate it before it reaches the form.
+      const message = explainAuthError(signInError.message, publicEnv.supabaseUrl);
+      redirect(`/login?error=${encodeURIComponent(message)}`);
     }
 
     redirect(`/login?sent=1&next=${encodeURIComponent(nextPath)}`);

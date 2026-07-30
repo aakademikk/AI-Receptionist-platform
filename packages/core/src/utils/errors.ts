@@ -103,6 +103,38 @@ export function isAppError(error: unknown): error is AppError {
   return error instanceof AppError;
 }
 
+/**
+ * Translate a Supabase auth error into something the person reading it can act on.
+ *
+ * Two of these are transport failures wearing an application error's clothes. The
+ * Supabase client parses every response as JSON, so if the configured URL reaches
+ * something that answers with a web page, the user is shown
+ * `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` — a message about a
+ * parser, at sign-in, that names neither the URL nor the mistake. `fetch failed` is
+ * the same problem when the host does not resolve at all.
+ *
+ * Anything genuinely from the auth API ("Email rate limit exceeded", an invalid
+ * link) is already meaningful and passes through untouched.
+ */
+export function explainAuthError(message: string, supabaseUrl: string): string {
+  if (message.includes('is not valid JSON') || message.includes('<!DOCTYPE')) {
+    return (
+      `${supabaseUrl} answered with a web page instead of the Supabase API. ` +
+      `Check NEXT_PUBLIC_SUPABASE_URL — locally the API is on port 54321 ` +
+      `(54323 is Studio, and 3000 is this app).`
+    );
+  }
+
+  if (/^fetch failed$/i.test(message.trim()) || message.includes('ENOTFOUND')) {
+    return (
+      `Could not reach the Supabase API at ${supabaseUrl}. ` +
+      `Start it with \`pnpm db:start\`, or correct NEXT_PUBLIC_SUPABASE_URL.`
+    );
+  }
+
+  return message;
+}
+
 /** Normalise anything thrown into an AppError so route handlers stay tidy. */
 export function toAppError(error: unknown): AppError {
   if (isAppError(error)) return error;

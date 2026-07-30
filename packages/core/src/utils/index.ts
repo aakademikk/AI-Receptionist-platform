@@ -41,6 +41,7 @@ export {
   providerRefused,
   isAppError,
   toAppError,
+  explainAuthError,
   type ErrorCode,
 } from './errors.ts';
 

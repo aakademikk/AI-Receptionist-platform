@@ -55,10 +55,55 @@ function integer(name: string, fallback: number): number {
   return parsed;
 }
 
+/**
+ * Catch the Supabase URLs that are wrong in a way the Supabase client cannot
+ * report usefully.
+ *
+ * When the URL points at something that answers with a web page rather than the
+ * auth API, the client tries to `JSON.parse` the HTML and surfaces
+ * `Unexpected token '<', "<!DOCTYPE "... is not valid JSON` — a message that says
+ * nothing about the actual mistake, and which arrives at sign-in rather than at
+ * boot. These checks fail earlier and name the fix.
+ *
+ * Deliberately narrow. Self-hosted Supabase lives on any host and port, so this
+ * rejects only what cannot be right: the placeholder shipped in `.env.example`, and
+ * the Studio port — which is the URL you have in your browser and therefore the one
+ * most likely to be pasted, while the API is on 54321.
+ */
+function assertSupabaseApiUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new ConfigError(
+      `NEXT_PUBLIC_SUPABASE_URL is not a valid URL: "${value}". ` +
+        `Expected something like http://127.0.0.1:54321 or https://<ref>.supabase.co.`,
+    );
+  }
+
+  if (parsed.hostname === 'your-project.supabase.co') {
+    throw new ConfigError(
+      'NEXT_PUBLIC_SUPABASE_URL is still the placeholder from .env.example. ' +
+        'Run `pnpm db:start` and use the API URL it prints (http://127.0.0.1:54321), ' +
+        "or your hosted project's URL from its API settings.",
+    );
+  }
+
+  if (parsed.port === '54323') {
+    throw new ConfigError(
+      'NEXT_PUBLIC_SUPABASE_URL points at Supabase Studio (port 54323), which serves ' +
+        'a web page rather than the API. Use the API URL instead: ' +
+        `${parsed.protocol}//${parsed.hostname}:54321`,
+    );
+  }
+
+  return value;
+}
+
 /** Values that are safe to expose to the browser. */
 export const publicEnv = {
   get supabaseUrl(): string {
-    return required('NEXT_PUBLIC_SUPABASE_URL');
+    return assertSupabaseApiUrl(required('NEXT_PUBLIC_SUPABASE_URL'));
   },
   get supabaseAnonKey(): string {
     return required('NEXT_PUBLIC_SUPABASE_ANON_KEY');
