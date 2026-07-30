@@ -55,9 +55,20 @@ Recent CLI versions renamed the keys, so the labels do not match the variable na
 | `Publishable` — `sb_publishable_…` (was `anon key`) | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
 | `Secret` — `sb_secret_…` (was `service_role key`) | `SUPABASE_SERVICE_ROLE_KEY` |
 
-Both formats work. `supabase-js` recognises the `sb_`-prefixed keys and sends them in
-the `apikey` header rather than as a bearer token, because they are not JWTs; nothing
-in this codebase treats a key as one.
+The **publishable** key works in either format. The **service-role** key must be the
+**legacy JWT** — `pnpm exec supabase status -o env` prints it as `SERVICE_ROLE_KEY`.
+
+`supabase-js` falls back to sending the API key as an `Authorization: Bearer` token
+whenever there is no user session, which is every request the service client makes. A
+legacy key is a JWT so that is fine; an `sb_secret_…` key is not, and PostgREST rejects
+it with `No suitable key or wrong key type`. The library does suppress that fallback
+for new-format keys — but only on its Edge Functions client, where the flag is
+hardcoded and not exposed to callers.
+
+The failure is worth recognising because of its shape: the dashboard carries on
+working, since it authenticates with a real user JWT and uses the publishable key only
+as an identifier. Only service-role paths break — webhooks, takeover, the internal API
+— so the app looks half-alive rather than misconfigured. `pnpm env:check` flags it.
 
 **Use `Project URL` — port 54321.** Three nearby URLs are not the API and all of them
 get pasted by mistake: Studio (54323), the Storage (S3) URL ending `/storage/v1/s3`

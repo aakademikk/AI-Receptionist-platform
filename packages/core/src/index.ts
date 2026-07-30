@@ -19,7 +19,7 @@ export * from './prompts/index.ts';
 export * from './integrations/index.ts';
 export * from './utils/index.ts';
 
-export { getAdminClient, unwrap, unwrapMaybe } from './supabase/admin.ts';
+export { getAdminClient, unwrap, unwrapMaybe, explainSupabaseError } from './supabase/admin.ts';
 export {
   encryptSecret,
   decryptSecret,

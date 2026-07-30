@@ -181,6 +181,22 @@ if (anon.startsWith('sb_secret_')) {
       'bundle — swap the two. Publishable goes here.',
   );
 }
+/*
+ * A current-format secret key breaks every service-role call while leaving the
+ * dashboard working, because supabase-js sends the API key as a bearer token when
+ * there is no user session and PostgREST cannot verify a non-JWT. The library only
+ * suppresses that fallback on its Edge Functions client. Symptom is
+ * "No suitable key or wrong key type" on webhooks, takeover and the whole internal API.
+ */
+if (service.startsWith('sb_secret_')) {
+  problems.push(
+    'SUPABASE_SERVICE_ROLE_KEY is a current-format secret key (sb_secret_…). ' +
+      'supabase-js sends it to PostgREST as a bearer token, which cannot verify it — ' +
+      'every service-role call fails with "No suitable key or wrong key type" while the ' +
+      'dashboard keeps working. Use the legacy JWT: `pnpm exec supabase status -o env` ' +
+      'prints it as SERVICE_ROLE_KEY.',
+  );
+}
 if (service.startsWith('sb_publishable_')) {
   problems.push(
     'SUPABASE_SERVICE_ROLE_KEY holds a publishable key (sb_publishable_…). It cannot ' +

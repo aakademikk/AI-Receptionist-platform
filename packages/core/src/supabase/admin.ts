@@ -45,6 +45,35 @@ export function getAdminClient(): SupabaseClient {
 }
 
 /**
+ * Turn PostgREST's account of a key problem into one that names the key.
+ *
+ * `supabase-js` falls back to sending the API key as an `Authorization: Bearer`
+ * token when there is no user session — which is every request this client makes.
+ * A legacy service-role key is a JWT, so that works. A current-format `sb_secret_…`
+ * key is not, so PostgREST tries to verify it as one and fails with
+ * "No suitable key or wrong key type", saying nothing about which key or why.
+ *
+ * The library suppresses that Bearer fallback for new-format keys, but only on its
+ * Edge Functions client — the flag is hardcoded there and not configurable for the
+ * REST client, so this is not something the caller can switch off.
+ *
+ * What makes it genuinely nasty is the asymmetry: the dashboard keeps working,
+ * because it authenticates with a real user JWT and only uses the publishable key as
+ * an identifier. Only the service-role paths break, so the app looks half-alive.
+ */
+export function explainSupabaseError(message: string): string {
+  if (/no suitable key|wrong key type/i.test(message)) {
+    return (
+      `${message} — this usually means SUPABASE_SERVICE_ROLE_KEY holds a current-format ` +
+      `secret key (sb_secret_…), which supabase-js sends as a bearer token that ` +
+      `PostgREST cannot verify. Use the legacy service_role JWT instead: ` +
+      `\`pnpm exec supabase status -o env\` prints it as SERVICE_ROLE_KEY.`
+    );
+  }
+  return message;
+}
+
+/**
  * Wrap a Supabase result, throwing on error.
  *
  * Supabase returns `{ data, error }` rather than throwing, which is ergonomic
@@ -53,7 +82,9 @@ export function getAdminClient(): SupabaseClient {
  */
 export function unwrap<T>(result: { data: T | null; error: { message: string; code?: string } | null }, what: string): T {
   if (result.error) {
-    throw new Error(`${what} failed: ${result.error.message}${result.error.code ? ` (${result.error.code})` : ''}`);
+    throw new Error(
+      `${what} failed: ${explainSupabaseError(result.error.message)}${result.error.code ? ` (${result.error.code})` : ''}`,
+    );
   }
   if (result.data === null) {
     throw new Error(`${what} returned no data`);
@@ -69,7 +100,7 @@ export function unwrapMaybe<T>(result: {
   if (result.error) {
     // PGRST116 is "no rows returned" from .single(); that is not a fault here.
     if (result.error.code === 'PGRST116') return null;
-    throw new Error(`${what} failed: ${result.error.message}`);
+    throw new Error(`${what} failed: ${explainSupabaseError(result.error.message)}`);
   }
   return result.data;
 }
