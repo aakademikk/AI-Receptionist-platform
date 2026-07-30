@@ -11,7 +11,7 @@
 -- =============================================================================
 
 -- A dev login: dev@atwood.systems. Sign in at /login — the app is magic-link only,
--- so there is no password here; the link is caught by Inbucket on :54324 locally.
+-- so there is no password here; local mail is caught, not sent — read it on :54324.
 -- email_confirmed_at is set so GoTrue treats the address as already verified.
 insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
 values (

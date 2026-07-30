@@ -17,7 +17,10 @@ major_version = 15
 enabled = true
 port = 54323
 
-[inbucket]
+# The local mail catcher. Magic links are never actually delivered locally — they are
+# viewable at http://localhost:54324 instead. Named [inbucket] before CLI 2.x, which
+# warns on every command if the old name is used.
+[local_smtp]
 enabled = true
 port = 54324
 

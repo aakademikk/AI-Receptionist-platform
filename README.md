@@ -116,7 +116,14 @@ costs — a non-developer cannot change escalation behaviour by dragging a node.
 
 ## Quickstart
 
-Node 22+, pnpm 10+, Docker, the Supabase CLI.
+**Node 22+, pnpm 10+, and Docker Desktop running.** The Supabase CLI is a dev
+dependency, so `pnpm install` brings it — no global install, and the whole team gets
+the same version. It ships per-platform binaries as optional dependencies, so there
+is no build step to approve on Windows.
+
+Docker is not optional: `pnpm db:start` runs Postgres, Auth, PostgREST, Realtime and
+Studio as containers, and without a running daemon it fails with
+`failed to connect to the docker API`.
 
 ```bash
 pnpm install
@@ -125,20 +132,26 @@ cp .env.example .env.local && cp .env.example .env   # .env is for docker compos
 openssl rand -base64 48                              # INTERNAL_API_SECRET, N8N_ENCRYPTION_KEY
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"  # CREDENTIAL_ENCRYPTION_KEY
 
-pnpm db:start        # Postgres, GoTrue, PostgREST, Realtime, Studio — prints your keys
+pnpm db:start        # prints the API URL and both keys — copy them into .env.local
 pnpm db:reset        # migrations + seed
 pnpm dev             # http://localhost:3000
-pnpm n8n:up          # http://localhost:5678
+pnpm n8n:up          # optional; http://localhost:5678
 ```
 
-Sign in at `/login` as `dev@atwood.systems`; the magic link lands in Inbucket at
-`http://localhost:54324`. The seed ships Parkfords Property Management with two
-conversations — one of them escalated — so the dashboard has something to show.
+**Take the three Supabase values from what `pnpm db:start` prints**, rather than
+typing them. The API is on **54321**; `54323` is Studio and serves a web page, so
+pasting it produces a sign-in error about invalid JSON rather than anything about
+the URL.
+
+Sign in at `/login` as `dev@atwood.systems`. The magic link is never really sent
+locally — read it at `http://localhost:54324`. The seed ships Parkfords Property
+Management with two conversations — one of them escalated — so the dashboard has
+something to show.
 
 Full walkthrough, Twilio and n8n wiring, and production deployment:
 [`docs/06-deployment.md`](docs/06-deployment.md).
 
-### Verifying the database without Supabase
+### Verifying the database without Docker
 
 ```bash
 ./supabase/tests/validate_local.sh

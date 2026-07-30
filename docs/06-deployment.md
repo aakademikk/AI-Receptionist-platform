@@ -2,7 +2,15 @@
 
 ## Local
 
-Prerequisites: Node 22+, pnpm 10+, Docker, the Supabase CLI.
+Prerequisites: Node 22+, pnpm 10+, and Docker Desktop **running**.
+
+The Supabase CLI is a dev dependency rather than a global install, so `pnpm install`
+provides it and everyone gets the same version. It publishes per-platform binaries as
+optional dependencies (`@supabase/cli-windows-x64` and friends), so there is no
+postinstall script for pnpm to block.
+
+Docker is a hard requirement for `pnpm db:start` — the local stack is containers, and
+without a daemon the CLI fails with `failed to connect to the docker API`.
 
 ```bash
 git clone <repo> && cd atwood-systems
@@ -27,8 +35,13 @@ pnpm db:start     # supabase start — Postgres, GoTrue, PostgREST, Realtime, St
 pnpm db:reset     # migrations + seed
 ```
 
-`db:start` prints the local anon and service-role keys; put them in `.env.local`
-and `.env`.
+`db:start` prints the API URL and the anon and service-role keys; copy all three into
+`.env.local` and `.env` rather than typing them.
+
+**Use the `API URL` line, which is port 54321.** Studio is on 54323 and serves a web
+page, so a client pointed at it parses HTML as JSON. The app now rejects that URL at
+boot with the port to use instead, but the reason it needed to is that the Studio URL
+is the one you have open in a browser.
 
 Then:
 
@@ -37,9 +50,10 @@ pnpm dev          # http://localhost:3000
 pnpm n8n:up       # http://localhost:5678
 ```
 
-Sign in at `/login` as `dev@atwood.systems` — the magic link lands in Inbucket at
-`http://localhost:54324`. The seed creates Parkfords Property Management with two
-conversations, one of them escalated, so the dashboard has something to show.
+Sign in at `/login` as `dev@atwood.systems`. Local mail is caught rather than
+delivered — read the link at `http://localhost:54324`. The seed creates Parkfords
+Property Management with two conversations, one of them escalated, so the dashboard
+has something to show.
 
 ### Verifying the schema without Supabase
 
