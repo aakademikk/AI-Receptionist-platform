@@ -12,15 +12,82 @@
 
 -- A dev login: dev@atwood.systems. Sign in at /login — the app is magic-link only,
 -- so there is no password here; local mail is caught, not sent — read it on :54324.
--- email_confirmed_at is set so GoTrue treats the address as already verified.
-insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
+--
+-- `instance_id` and `aud` are load-bearing, not decoration. GoTrue finds an account
+-- with roughly
+--     instance_id = '00000000-…' and lower(email) = ? and aud = 'authenticated'
+-- so a row missing either column is invisible to sign-in — and because
+-- signInWithOtp creates a user when it finds none, the magic link silently produces a
+-- *second* account with a different id. That one owns no membership, so the sign-in
+-- appears to succeed and lands on "You are not a member of any business yet".
+--
+-- `email_confirmed_at` marks the address already verified.
+insert into auth.users (
+  instance_id,
+  id,
+  aud,
+  role,
+  email,
+  email_confirmed_at,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at
+)
 values (
+  '00000000-0000-0000-0000-000000000000',
   '00000000-0000-4000-8000-000000000001',
+  'authenticated',
+  'authenticated',
   'dev@atwood.systems',
+  now(),
+  '{"provider": "email", "providers": ["email"]}'::jsonb,
   '{"full_name": "Dev Owner"}'::jsonb,
+  now(),
   now()
 )
 on conflict (id) do nothing;
+
+/*
+ * The matching identity row. A bare `auth.users` row is enough to be found, but an
+ * email-provider account is expected to have an identity, and its absence shows up
+ * later in account linking and in the `identities` claim.
+ *
+ * The table's shape has changed across GoTrue versions — older releases keyed it by
+ * `id text` holding the provider id, newer ones added a `provider_id` column and made
+ * `id` a defaulted uuid — so this adapts instead of pinning one version's columns and
+ * breaking on the other.
+ */
+do $$
+declare
+  v_user uuid := '00000000-0000-4000-8000-000000000001';
+  v_identity jsonb := jsonb_build_object(
+    'sub', '00000000-0000-4000-8000-000000000001',
+    'email', 'dev@atwood.systems',
+    'email_verified', true
+  );
+begin
+  if to_regclass('auth.identities') is null then
+    return;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'auth' and table_name = 'identities' and column_name = 'provider_id'
+  ) then
+    insert into auth.identities (
+      provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+    )
+    values (v_user::text, v_user, v_identity, 'email', now(), now(), now())
+    on conflict do nothing;
+  else
+    insert into auth.identities (
+      id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+    )
+    values (v_user::text, v_user, v_identity, 'email', now(), now(), now())
+    on conflict do nothing;
+  end if;
+end $$;
 
 insert into public.businesses (id, slug, name, status, plan, timezone, default_region)
 values (
