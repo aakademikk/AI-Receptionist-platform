@@ -132,16 +132,22 @@ array['whatsapp']`, pointed at the same webhook.
 Create a project, then:
 
 ```bash
-supabase link --project-ref <ref>
-supabase db push
+pnpm exec supabase link --project-ref <ref>
+pnpm exec supabase db push
 ```
+
+The `pnpm exec` prefix is not decoration. The CLI is a dev dependency of this repo,
+not a global install, so a bare `supabase …` gives
+`The term 'supabase' is not recognized` on Windows (`command not found` elsewhere).
+The `pnpm db:*` scripts work without the prefix because pnpm puts
+`node_modules/.bin` on PATH for scripts it runs itself.
 
 Post-deploy checklist:
 
 1. **Enable pgvector** in Database → Extensions if any tenant will use embeddings.
 2. **Set the site URL and redirect allowlist** in Auth settings to your real
    domain, or magic links will point at localhost.
-3. **Run `supabase db lint`** and check the advisors panel.
+3. **Run `pnpm exec supabase db lint`** and check the advisors panel.
 4. **Confirm RLS is on for every table** — the migration does this, but it is worth
    seeing in the dashboard.
 5. **Turn on PITR** on any plan that offers it.
