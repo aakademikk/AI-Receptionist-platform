@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { describe, it } from 'node:test';
 
-import { reconstructTwilioUrl, validateTwilioSignature } from './twilio.ts';
+import { diagnoseTwilioSignature, reconstructTwilioUrl, validateTwilioSignature } from './twilio.ts';
 
 /**
  * Every case here is a real deployment shape. The signature covers this URL exactly,
@@ -175,6 +176,74 @@ describe('validateTwilioSignature', () => {
         validateTwilioSignature({ signature: null, url: VECTORS[0]!.url, params: VECTORS[0]!.params }),
         false,
       );
+    });
+  });
+});
+
+describe('diagnoseTwilioSignature', () => {
+  const params = { MessageSid: 'SM123', From: '+447700900123', Body: 'hello' };
+
+  const withToken = <T>(fn: () => T): T => {
+    const previous = process.env['TWILIO_AUTH_TOKEN'];
+    process.env['TWILIO_AUTH_TOKEN'] = AUTH_TOKEN;
+    try {
+      return fn();
+    } finally {
+      if (previous === undefined) delete process.env['TWILIO_AUTH_TOKEN'];
+      else process.env['TWILIO_AUTH_TOKEN'] = previous;
+    }
+  };
+
+  /** The signature Twilio would send having signed `url`. */
+  const signFor = (url: string): string => {
+    let payload = url;
+    for (const key of Object.keys(params).sort()) {
+      payload += key + params[key as keyof typeof params];
+    }
+    return createHmac('sha1', AUTH_TOKEN).update(Buffer.from(payload, 'utf8')).digest('base64');
+  };
+
+  it('identifies a console entry using http where we reconstructed https', () => {
+    const signed = 'http://tunnel.example.com/api/webhooks/twilio/sms';
+    withToken(() => {
+      const found = diagnoseTwilioSignature({
+        signature: signFor(signed),
+        url: 'https://tunnel.example.com/api/webhooks/twilio/sms',
+        params,
+      });
+      assert.equal(found, signed);
+    });
+  });
+
+  it('identifies a console entry carrying a trailing slash', () => {
+    const signed = 'https://tunnel.example.com/api/webhooks/twilio/sms/';
+    withToken(() => {
+      const found = diagnoseTwilioSignature({
+        signature: signFor(signed),
+        url: 'https://tunnel.example.com/api/webhooks/twilio/sms',
+        params,
+      });
+      assert.equal(found, signed);
+    });
+  });
+
+  it('returns null when no variant matches, rather than guessing', () => {
+    // A genuinely wrong token must not be reported as a URL problem.
+    withToken(() => {
+      const found = diagnoseTwilioSignature({
+        signature: 'AAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+        url: 'https://tunnel.example.com/api/webhooks/twilio/sms',
+        params,
+      });
+      assert.equal(found, null);
+    });
+  });
+
+  it('never reports the URL that already failed', () => {
+    const url = 'https://tunnel.example.com/api/webhooks/twilio/sms';
+    withToken(() => {
+      const found = diagnoseTwilioSignature({ signature: signFor(url), url, params });
+      assert.notEqual(found, url, 'the caller already rejected this one');
     });
   });
 });

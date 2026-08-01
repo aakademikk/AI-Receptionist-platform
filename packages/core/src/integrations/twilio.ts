@@ -212,6 +212,53 @@ export function validateTwilioSignature(input: {
 }
 
 /**
+ * On a signature failure, work out which URL Twilio actually signed.
+ *
+ * The signature covers the URL exactly as configured in the Twilio console, and a
+ * console entry that differs from the reconstructed URL by one character — a scheme,
+ * a trailing slash — fails identically to a wrong auth token. Nothing in the failure
+ * says which, and the console shows you the value you believe is correct.
+ *
+ * So rather than describing the possibilities, try them. Each candidate is a URL a
+ * console entry plausibly holds; whichever one validates is, by definition, what
+ * Twilio signed, and naming it turns the whole class of problem into a one-line fix.
+ *
+ * **Diagnostic only.** This never admits a request — the caller has already decided
+ * to reject. It reports what the correct configuration would be; it does not become
+ * the correct configuration.
+ */
+export function diagnoseTwilioSignature(input: {
+  signature: string;
+  url: string;
+  params: Record<string, string>;
+}): string | null {
+  const parsed = (() => {
+    try {
+      return new URL(input.url);
+    } catch {
+      return null;
+    }
+  })();
+  if (!parsed) return null;
+
+  const candidates = new Set<string>();
+  for (const scheme of ['https:', 'http:']) {
+    for (const path of [parsed.pathname.replace(/\/+$/, ''), `${parsed.pathname.replace(/\/+$/, '')}/`]) {
+      const variant = new URL(parsed.toString());
+      variant.protocol = scheme;
+      variant.pathname = path || '/';
+      candidates.add(variant.toString());
+    }
+  }
+  candidates.delete(input.url);
+
+  for (const candidate of candidates) {
+    if (validateTwilioSignature({ ...input, url: candidate })) return candidate;
+  }
+  return null;
+}
+
+/**
  * Rebuild the public URL Twilio signed.
  *
  * The signature covers the exact URL configured in the Twilio console, so validation
@@ -315,14 +362,19 @@ export function requireValidTwilioSignature(input: Parameters<typeof validateTwi
      * -- agrees with a token the app is not using.
      */
     const fingerprint = createHash('sha256').update(authToken).digest('hex').slice(0, 12);
+    const signedInstead = input.signature
+      ? diagnoseTwilioSignature({ signature: input.signature, url: input.url, params: input.params })
+      : null;
     logger.warn('Rejected a Twilio webhook with an invalid signature', {
       url: input.url,
+      ...(signedInstead ? { twilioActuallySigned: signedInstead } : {}),
       authTokenLength: authToken.length,
       authTokenFingerprint: fingerprint,
       signaturePresent: Boolean(input.signature),
       paramCount: Object.keys(input.params).length,
-      hint:
-        authToken.length === 32
+      hint: signedInstead
+        ? `The signature matches ${signedInstead}. That is what the Twilio console holds for this number — either correct it there, or point TWILIO_WEBHOOK_BASE_URL at that origin.`
+        : authToken.length === 32
           ? 'Token length looks right. Compare authTokenFingerprint against sha256 of the token in your .env file — if they differ, a shell or machine-level TWILIO_AUTH_TOKEN is overriding it, because Next.js never overwrites a variable already set in the real environment.'
           : `Expected a 32-character auth token, got ${authToken.length}. Check TWILIO_AUTH_TOKEN for a truncated paste or stray whitespace.`,
     });
