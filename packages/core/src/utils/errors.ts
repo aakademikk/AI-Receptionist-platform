@@ -104,6 +104,30 @@ export function isAppError(error: unknown): error is AppError {
 }
 
 /**
+ * Say what `fetch failed` actually was.
+ *
+ * Node's fetch collapses every transport failure into the two words "fetch failed"
+ * and hides the real reason — DNS, refused connection, expired certificate — one or
+ * two levels down in `cause`. Logging the outer message alone turns a five-second
+ * diagnosis into an afternoon, so this walks the chain and reports the innermost
+ * thing that has something to say.
+ */
+export function describeFetchError(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const code = (current as NodeJS.ErrnoException).code;
+    const detail = code ? `${current.message} (${code})` : current.message;
+    if (!parts.includes(detail)) parts.push(detail);
+    current = (current as { cause?: unknown }).cause;
+  }
+
+  if (parts.length === 0) return String(error);
+  return parts.join(' — caused by: ');
+}
+
+/**
  * Translate a Supabase auth error into something the person reading it can act on.
  *
  * Two of these are transport failures wearing an application error's clothes. The

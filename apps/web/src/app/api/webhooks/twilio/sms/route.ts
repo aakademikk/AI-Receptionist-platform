@@ -1,6 +1,7 @@
 import { after } from 'next/server';
 
 import {
+  describeFetchError,
   logger,
   parseInboundMessage,
   parseTwilioForm,
@@ -78,7 +79,8 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
       logger.error('Inbound message could not be dispatched', {
         messageSid: message.messageSid,
         via: n8nBase ? 'n8n' : 'in-process',
-        error: error instanceof Error ? error.message : String(error),
+        target,
+        error: describeFetchError(error),
       });
     }
   });

@@ -1,4 +1,4 @@
-import { logger, toAppError } from '@atwood/core';
+import { logger, serverEnv, toAppError } from '@atwood/core';
 
 /**
  * Error mapping for the Twilio webhook routes.
@@ -80,6 +80,30 @@ function escapeXmlComment(message: string): string {
  */
 export function reconstructUrl(request: Request): string {
   const original = new URL(request.url);
+
+  /*
+   * An explicit override wins over the headers. A tunnel that rewrites Host to the
+   * origin — which is what a quick tunnel does — leaves the app rebuilding
+   * `http://localhost:3000/...` and rejecting every request as a bad signature, and no
+   * amount of header inspection recovers a value that was never forwarded.
+   *
+   * Only scheme and host are taken; path and query still come from the request, so one
+   * setting covers every webhook route.
+   */
+  const override = serverEnv.twilioWebhookBaseUrl;
+  if (override) {
+    try {
+      const base = new URL(override);
+      original.protocol = base.protocol;
+      original.host = base.host;
+      return original.toString();
+    } catch {
+      logger.warn('TWILIO_WEBHOOK_BASE_URL is not a valid URL; falling back to headers', {
+        value: override,
+      });
+    }
+  }
+
   const forwardedProto = request.headers.get('x-forwarded-proto');
   const forwardedHost = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
 

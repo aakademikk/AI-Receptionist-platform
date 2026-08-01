@@ -2,6 +2,7 @@ import { after } from 'next/server';
 
 import {
   buildHangupTwiml,
+  describeFetchError,
   logger,
   parseInboundCall,
   parseTwilioForm,
@@ -100,7 +101,8 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
       logger.error('Missed-call follow-up could not be dispatched', {
         callSid: call.callSid,
         via: n8nBase ? 'n8n' : 'in-process',
-        error: error instanceof Error ? error.message : String(error),
+        target,
+        error: describeFetchError(error),
       });
     }
   });

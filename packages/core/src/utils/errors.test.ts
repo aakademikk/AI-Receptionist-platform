@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { explainAuthError } from './errors.ts';
+import { describeFetchError, explainAuthError } from './errors.ts';
 
 const URL_ = 'http://127.0.0.1:54323';
 
@@ -56,5 +56,39 @@ describe('explainAuthError', () => {
   it('does not mistake a message that merely mentions fetching for a transport failure', () => {
     const message = 'Could not fetch failed login attempts for this user';
     assert.equal(explainAuthError(message, URL_), message);
+  });
+});
+
+describe('describeFetchError', () => {
+  it('unwraps the cause Node hides behind "fetch failed"', () => {
+    // Exactly the shape undici produces: a bare outer message, real reason in `cause`.
+    const inner = Object.assign(new Error('getaddrinfo ENOTFOUND n8n.example.uk'), {
+      code: 'ENOTFOUND',
+    });
+    const outer = new Error('fetch failed', { cause: inner });
+
+    const result = describeFetchError(outer);
+    assert.match(result, /fetch failed/);
+    assert.match(result, /ENOTFOUND/, 'the useful part must survive');
+    assert.match(result, /n8n\.example\.uk/);
+  });
+
+  it('reports a TLS failure rather than swallowing it', () => {
+    const inner = Object.assign(new Error('certificate has expired'), {
+      code: 'CERT_HAS_EXPIRED',
+    });
+    assert.match(describeFetchError(new Error('fetch failed', { cause: inner })), /CERT_HAS_EXPIRED/);
+  });
+
+  it('does not loop forever on a cyclic cause chain', () => {
+    const a = new Error('a');
+    const b = new Error('b', { cause: a });
+    (a as { cause?: unknown }).cause = b;
+    const result = describeFetchError(b);
+    assert.ok(result.length < 200, 'must terminate');
+  });
+
+  it('handles a plain thrown value', () => {
+    assert.equal(describeFetchError('something odd'), 'something odd');
   });
 });

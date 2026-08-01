@@ -217,8 +217,31 @@ export const serverEnv = {
     return optional('NOTIFICATION_FROM_EMAIL', 'notifications@atwood.systems')!;
   },
 
+  /**
+   * Trailing slash stripped: callers append `/webhook/...`, and a base ending in `/`
+   * produces a double slash that some reverse proxies answer with a 404 rather than
+   * normalising. Cheaper to handle here than to explain each time.
+   */
   get n8nWebhookBaseUrl(): string | undefined {
-    return optional('N8N_WEBHOOK_BASE_URL');
+    return optional('N8N_WEBHOOK_BASE_URL')?.replace(/\/+$/, '');
+  },
+
+  /**
+   * Public origin Twilio signed its request against, when the app cannot work it out
+   * itself.
+   *
+   * The signature covers the exact URL configured in Twilio, so validation needs that
+   * URL rebuilt byte for byte. Normally `x-forwarded-proto` / `x-forwarded-host` carry
+   * it, but a tunnel that rewrites the Host header to the origin (which is what a
+   * quick tunnel does by default) leaves the app reconstructing
+   * `http://localhost:3000/...` and rejecting every request as a bad signature.
+   *
+   * Set this to the public base — `https://<tunnel>.trycloudflare.com` — and the
+   * scheme and host come from here instead. Path and query still come from the
+   * request, so it stays correct across every route.
+   */
+  get twilioWebhookBaseUrl(): string | undefined {
+    return optional('TWILIO_WEBHOOK_BASE_URL')?.replace(/\/+$/, '');
   },
 
   get logLevel(): string {

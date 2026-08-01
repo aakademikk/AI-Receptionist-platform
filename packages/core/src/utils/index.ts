@@ -42,6 +42,7 @@ export {
   isAppError,
   toAppError,
   explainAuthError,
+  describeFetchError,
   type ErrorCode,
 } from './errors.ts';
 
