@@ -2,7 +2,7 @@
   "name": "atwood-systems",
   "private": true,
   "version": "0.1.0",
-  "description": "Atwood Systems \u2014 white-label AI receptionist platform for missed calls, SMS and WhatsApp.",
+  "description": "Atwood Systems — white-label AI receptionist platform for missed calls, SMS and WhatsApp.",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=22"
