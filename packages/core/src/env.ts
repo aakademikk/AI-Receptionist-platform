@@ -212,6 +212,22 @@ export const serverEnv = {
     assertServer('TWILIO_AUTH_TOKEN');
     return required('TWILIO_AUTH_TOKEN');
   },
+
+  /**
+   * The account's other auth token, during a rotation.
+   *
+   * Twilio no longer offers an in-place regenerate: you request a secondary token,
+   * move your systems onto it, then promote it to primary. Both are valid account
+   * credentials throughout, and a webhook in flight may have been signed with either
+   * — so a deployment that only knows one of them rejects real traffic for the whole
+   * rotation window.
+   *
+   * Set it during a rotation, clear it once the promotion has settled.
+   */
+  get twilioAuthTokenSecondary(): string | undefined {
+    assertServer('TWILIO_AUTH_TOKEN_SECONDARY');
+    return optional('TWILIO_AUTH_TOKEN_SECONDARY');
+  },
   get twilioMessagingServiceSid(): string | undefined {
     return optional('TWILIO_MESSAGING_SERVICE_SID');
   },

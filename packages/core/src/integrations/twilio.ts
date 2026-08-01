@@ -175,7 +175,17 @@ export function validateTwilioSignature(input: {
 }): boolean {
   if (!input.signature) return false;
 
-  const authToken = input.authToken ?? serverEnv.twilioAuthToken;
+  /*
+   * Every token the account currently holds, because during a rotation a request in
+   * flight may have been signed with either. Accepting both is Twilio's own guidance
+   * and does not widen anything: each is a full account credential either way, and a
+   * forged signature still has to match one of them.
+   */
+  const tokens = input.authToken
+    ? [input.authToken]
+    : [serverEnv.twilioAuthToken, serverEnv.twilioAuthTokenSecondary].filter(
+        (token): token is string => Boolean(token),
+      );
 
   const sortedKeys = Object.keys(input.params).sort();
   let payload = input.url;
@@ -183,7 +193,10 @@ export function validateTwilioSignature(input: {
     payload += key + input.params[key];
   }
 
-  const expected = createHmac('sha1', authToken).update(Buffer.from(payload, 'utf8')).digest('base64');
+  const signatures = tokens.map((token) =>
+    createHmac('sha1', token).update(Buffer.from(payload, 'utf8')).digest('base64'),
+  );
+  const expected = signatures[0]!;
 
   /*
    * At debug level only, the exact string that was signed.
@@ -205,10 +218,17 @@ export function validateTwilioSignature(input: {
   });
 
   const presented = Buffer.from(input.signature, 'utf8');
-  const computed = Buffer.from(expected, 'utf8');
-  if (presented.length !== computed.length) return false;
 
-  return timingSafeEqual(presented, computed);
+  // Every candidate is compared, and in constant time. Returning early on the first
+  // match would leak which token signed a request through timing.
+  let matched = false;
+  for (const candidate of signatures) {
+    const computed = Buffer.from(candidate, 'utf8');
+    if (presented.length === computed.length && timingSafeEqual(presented, computed)) {
+      matched = true;
+    }
+  }
+  return matched;
 }
 
 /**

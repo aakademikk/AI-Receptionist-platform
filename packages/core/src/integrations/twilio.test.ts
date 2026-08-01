@@ -247,3 +247,86 @@ describe('diagnoseTwilioSignature', () => {
     });
   });
 });
+
+describe('validateTwilioSignature during an auth token rotation', () => {
+  const SECONDARY = 'the_secondary_token_0987654321zyxw';
+  const params = { MessageSid: 'SM123', From: '+447700900123', Body: 'hello' };
+
+  const signWith = (token: string, url: string): string => {
+    let payload = url;
+    for (const key of Object.keys(params).sort()) {
+      payload += key + params[key as keyof typeof params];
+    }
+    return createHmac('sha1', token).update(Buffer.from(payload, 'utf8')).digest('base64');
+  };
+
+  const url = 'https://tunnel.example.com/api/webhooks/twilio/sms';
+
+  const withTokens = <T>(primary: string, secondary: string | undefined, fn: () => T): T => {
+    const prevP = process.env['TWILIO_AUTH_TOKEN'];
+    const prevS = process.env['TWILIO_AUTH_TOKEN_SECONDARY'];
+    process.env['TWILIO_AUTH_TOKEN'] = primary;
+    if (secondary === undefined) delete process.env['TWILIO_AUTH_TOKEN_SECONDARY'];
+    else process.env['TWILIO_AUTH_TOKEN_SECONDARY'] = secondary;
+    try {
+      return fn();
+    } finally {
+      if (prevP === undefined) delete process.env['TWILIO_AUTH_TOKEN'];
+      else process.env['TWILIO_AUTH_TOKEN'] = prevP;
+      if (prevS === undefined) delete process.env['TWILIO_AUTH_TOKEN_SECONDARY'];
+      else process.env['TWILIO_AUTH_TOKEN_SECONDARY'] = prevS;
+    }
+  };
+
+  it('accepts a request signed with the primary', () => {
+    withTokens(AUTH_TOKEN, SECONDARY, () => {
+      assert.equal(
+        validateTwilioSignature({ signature: signWith(AUTH_TOKEN, url), url, params }),
+        true,
+      );
+    });
+  });
+
+  it('accepts a request signed with the secondary', () => {
+    // The whole point: mid-rotation, Twilio may sign with either and both are real
+    // account credentials.
+    withTokens(AUTH_TOKEN, SECONDARY, () => {
+      assert.equal(
+        validateTwilioSignature({ signature: signWith(SECONDARY, url), url, params }),
+        true,
+      );
+    });
+  });
+
+  it('still rejects a signature from neither token', () => {
+    withTokens(AUTH_TOKEN, SECONDARY, () => {
+      assert.equal(
+        validateTwilioSignature({ signature: signWith('some_other_token_entirely_000000', url), url, params }),
+        false,
+      );
+    });
+  });
+
+  it('rejects the secondary once it is cleared', () => {
+    // Removing the variable must actually remove the trust, not just the intent.
+    withTokens(AUTH_TOKEN, undefined, () => {
+      assert.equal(
+        validateTwilioSignature({ signature: signWith(SECONDARY, url), url, params }),
+        false,
+      );
+    });
+  });
+
+  it('still rejects a wrong URL when two tokens are configured', () => {
+    withTokens(AUTH_TOKEN, SECONDARY, () => {
+      assert.equal(
+        validateTwilioSignature({
+          signature: signWith(SECONDARY, url),
+          url: 'https://tunnel.example.com:3000/api/webhooks/twilio/sms',
+          params,
+        }),
+        false,
+      );
+    });
+  });
+});
