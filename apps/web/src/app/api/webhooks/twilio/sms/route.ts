@@ -31,6 +31,25 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
   const params = parseTwilioForm(raw);
   const url = reconstructUrl(request);
 
+  /*
+   * The body exactly as it arrived, before parsing.
+   *
+   * Every other input to signature validation has been eliminated, and this is the
+   * one nobody has looked at. It distinguishes the remaining possibilities at a
+   * glance: whether phone numbers arrive percent-encoded (`From=%2B44…`) or already
+   * decoded (`From=+44…`, which standard form parsing then turns into a space and
+   * silently corrupts), whether the body is truncated, and whether the charset is
+   * what the parser assumes.
+   *
+   * Debug level, so off by default -- it contains the message body.
+   */
+  logger.debug('Twilio raw body', {
+    raw,
+    rawLength: raw.length,
+    contentType: request.headers.get('content-type'),
+    contentLength: request.headers.get('content-length'),
+  });
+
   requireValidTwilioSignature({
     signature: request.headers.get('x-twilio-signature'),
     url,
