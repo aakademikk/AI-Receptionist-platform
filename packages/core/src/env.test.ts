@@ -33,6 +33,21 @@ function rejection(url: string): ConfigError {
   throw new assert.AssertionError({ message: `expected ${url} to be rejected` });
 }
 
+describe('env value trimming', () => {
+  it('strips whitespace that would silently corrupt a credential', () => {
+    // A trailing space survives a copy-paste invisibly, and in TWILIO_AUTH_TOKEN it
+    // becomes part of the HMAC key — every webhook then fails as an invalid
+    // signature while the token looks correct in the file.
+    process.env['NEXT_PUBLIC_SUPABASE_URL'] = '  http://127.0.0.1:54321  ';
+    assert.equal(publicEnv.supabaseUrl, 'http://127.0.0.1:54321');
+  });
+
+  it('treats a whitespace-only value as absent', () => {
+    process.env['NEXT_PUBLIC_SUPABASE_URL'] = '   ';
+    assert.throws(() => publicEnv.supabaseUrl, /Missing required environment variable/);
+  });
+});
+
 describe('publicEnv.supabaseUrl', () => {
   it('accepts the local API URL', () => {
     assert.equal(read('http://127.0.0.1:54321'), 'http://127.0.0.1:54321');

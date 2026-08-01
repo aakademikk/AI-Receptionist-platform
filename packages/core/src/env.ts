@@ -30,9 +30,21 @@ function assertServer(name: string): void {
   }
 }
 
+/*
+ * Everything here is trimmed.
+ *
+ * Every value in this file is a token, key or URL, and none of them can legitimately
+ * carry leading or trailing whitespace — but a stray space survives a copy-paste into
+ * an .env file invisibly. The consequences are silent and awful: a padded
+ * TWILIO_AUTH_TOKEN becomes part of the HMAC key, so every inbound webhook is
+ * rejected as an invalid signature while the token *looks* correct in the file.
+ *
+ * These previously validated with .trim() and then returned the untrimmed value,
+ * which is the worst of both — the emptiness check passed and the padding stayed.
+ */
 function required(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value.trim() === '') {
+  const value = process.env[name]?.trim();
+  if (value === undefined || value === '') {
     throw new ConfigError(
       `Missing required environment variable ${name}. See .env.example.`,
     );
@@ -41,8 +53,8 @@ function required(name: string): string {
 }
 
 function optional(name: string, fallback?: string): string | undefined {
-  const value = process.env[name];
-  return value === undefined || value.trim() === '' ? fallback : value;
+  const value = process.env[name]?.trim();
+  return value === undefined || value === '' ? fallback : value;
 }
 
 function integer(name: string, fallback: number): number {

@@ -206,7 +206,30 @@ export function validateTwilioSignature(input: {
  */
 export function requireValidTwilioSignature(input: Parameters<typeof validateTwilioSignature>[0]): void {
   if (!validateTwilioSignature(input)) {
-    logger.warn('Rejected a Twilio webhook with an invalid signature', { url: input.url });
+    /*
+     * Three things can cause this, and the URL alone does not tell them apart, so log
+     * enough to distinguish them without printing anything secret:
+     *
+     *   * the reconstructed URL differs from the one configured in Twilio — compare
+     *     `url` below against the console field;
+     *   * the auth token is wrong, truncated or padded — `authTokenLength` is 32 for a
+     *     real one, and any other number identifies the problem immediately;
+     *   * the number belongs to a subaccount, which signs with its own token.
+     *
+     * A length is not a secret and cannot be worked backwards; it is the single most
+     * diagnostic thing available here.
+     */
+    const authToken = serverEnv.twilioAuthToken;
+    logger.warn('Rejected a Twilio webhook with an invalid signature', {
+      url: input.url,
+      authTokenLength: authToken.length,
+      signaturePresent: Boolean(input.signature),
+      paramCount: Object.keys(input.params).length,
+      hint:
+        authToken.length === 32
+          ? 'Token length looks right — check the URL matches Twilio exactly, and that the number is not on a subaccount with its own token.'
+          : `Expected a 32-character auth token, got ${authToken.length}. Check TWILIO_AUTH_TOKEN for a truncated paste or stray whitespace.`,
+    });
     throw new AppError('forbidden', 403, 'Invalid Twilio signature', {
       publicMessage: 'Signature verification failed.',
     });
