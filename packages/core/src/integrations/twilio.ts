@@ -382,6 +382,9 @@ export function requireValidTwilioSignature(input: Parameters<typeof validateTwi
      * -- agrees with a token the app is not using.
      */
     const fingerprint = createHash('sha256').update(authToken).digest('hex').slice(0, 12);
+    // How many tokens were actually in play, so a secondary that was never picked up
+    // is visible rather than assumed.
+    const tokensTried = serverEnv.twilioAuthTokenSecondary ? 2 : 1;
     const signedInstead = input.signature
       ? diagnoseTwilioSignature({ signature: input.signature, url: input.url, params: input.params })
       : null;
@@ -390,6 +393,7 @@ export function requireValidTwilioSignature(input: Parameters<typeof validateTwi
       ...(signedInstead ? { twilioActuallySigned: signedInstead } : {}),
       authTokenLength: authToken.length,
       authTokenFingerprint: fingerprint,
+      tokensTried,
       signaturePresent: Boolean(input.signature),
       paramCount: Object.keys(input.params).length,
       hint: signedInstead
@@ -398,6 +402,19 @@ export function requireValidTwilioSignature(input: Parameters<typeof validateTwi
           ? 'Token length looks right. Compare authTokenFingerprint against sha256 of the token in your .env file — if they differ, a shell or machine-level TWILIO_AUTH_TOKEN is overriding it, because Next.js never overwrites a variable already set in the real environment.'
           : `Expected a 32-character auth token, got ${authToken.length}. Check TWILIO_AUTH_TOKEN for a truncated paste or stray whitespace.`,
     });
+    /*
+     * The escape hatch, checked only after the rejection has been logged in full — so
+     * the record of what would have been refused survives, and a skipped request is
+     * never quiet.
+     */
+    if (serverEnv.allowUnsignedTwilioWebhooks) {
+      logger.warn('ACCEPTING an unverified Twilio webhook — TWILIO_SKIP_SIGNATURE_CHECK is on', {
+        url: input.url,
+        note: 'Development only. This endpoint currently accepts forged requests from anyone who knows its URL.',
+      });
+      return;
+    }
+
     throw new AppError('forbidden', 403, 'Invalid Twilio signature', {
       publicMessage: 'Signature verification failed.',
     });

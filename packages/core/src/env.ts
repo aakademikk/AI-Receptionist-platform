@@ -214,6 +214,34 @@ export const serverEnv = {
   },
 
   /**
+   * Accept Twilio webhooks without verifying their signature. **Development only.**
+   *
+   * Verification is the only thing standing between the inbound endpoint and anyone
+   * who learns its URL: without it, a stranger can post a forged customer message and
+   * bill the tenant for the AI reply. So this exists for one situation — a local
+   * environment where signatures cannot be made to verify and the alternative is
+   * commenting the check out, which is the same hole with none of the warnings and a
+   * real chance of being committed.
+   *
+   * Refuses to be honoured in production. Not ignored there — it throws, because a
+   * variable that silently does nothing in one environment and everything in another
+   * is how this ends up live.
+   */
+  get allowUnsignedTwilioWebhooks(): boolean {
+    assertServer('TWILIO_SKIP_SIGNATURE_CHECK');
+    if (optional('TWILIO_SKIP_SIGNATURE_CHECK') !== 'true') return false;
+
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new ConfigError(
+        'TWILIO_SKIP_SIGNATURE_CHECK is set in a production build. It disables webhook ' +
+          'authentication entirely, so it is refused here rather than quietly ignored. ' +
+          'Remove it from the deployment environment.',
+      );
+    }
+    return true;
+  },
+
+  /**
    * The account's other auth token, during a rotation.
    *
    * Twilio no longer offers an in-place regenerate: you request a secondary token,

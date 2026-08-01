@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { describe, it } from 'node:test';
 
-import { diagnoseTwilioSignature, reconstructTwilioUrl, validateTwilioSignature } from './twilio.ts';
+import {
+  diagnoseTwilioSignature,
+  reconstructTwilioUrl,
+  requireValidTwilioSignature,
+  validateTwilioSignature,
+} from './twilio.ts';
 
 /**
  * Every case here is a real deployment shape. The signature covers this URL exactly,
@@ -328,5 +333,90 @@ describe('validateTwilioSignature during an auth token rotation', () => {
         false,
       );
     });
+  });
+});
+
+describe('TWILIO_SKIP_SIGNATURE_CHECK', () => {
+  const url = 'https://tunnel.example.com/api/webhooks/twilio/sms';
+  const params = { MessageSid: 'SM123', Body: 'hello' };
+
+  const withEnv = <T>(vars: Record<string, string | undefined>, fn: () => T): T => {
+    const previous: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(vars)) {
+      previous[k] = process.env[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try {
+      return fn();
+    } finally {
+      for (const [k, v] of Object.entries(previous)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+
+  it('still rejects a bad signature when the flag is absent', () => {
+    withEnv(
+      { TWILIO_AUTH_TOKEN: AUTH_TOKEN, TWILIO_SKIP_SIGNATURE_CHECK: undefined, NODE_ENV: 'development' },
+      () => {
+        assert.throws(
+          () => requireValidTwilioSignature({ signature: 'nope', url, params }),
+          /Invalid Twilio signature/,
+        );
+      },
+    );
+  });
+
+  it('only honours the exact string "true", not any truthy value', () => {
+    // "1", "yes" and "TRUE" must not disable authentication by accident.
+    for (const value of ['1', 'yes', 'TRUE', 'on']) {
+      withEnv(
+        { TWILIO_AUTH_TOKEN: AUTH_TOKEN, TWILIO_SKIP_SIGNATURE_CHECK: value, NODE_ENV: 'development' },
+        () => {
+          assert.throws(
+            () => requireValidTwilioSignature({ signature: 'nope', url, params }),
+            /Invalid Twilio signature/,
+            `"${value}" must not disable verification`,
+          );
+        },
+      );
+    }
+  });
+
+  it('accepts a bad signature in development when explicitly enabled', () => {
+    withEnv(
+      { TWILIO_AUTH_TOKEN: AUTH_TOKEN, TWILIO_SKIP_SIGNATURE_CHECK: 'true', NODE_ENV: 'development' },
+      () => {
+        assert.doesNotThrow(() => requireValidTwilioSignature({ signature: 'nope', url, params }));
+      },
+    );
+  });
+
+  it('refuses to be honoured in production, loudly', () => {
+    // Throwing rather than ignoring: a variable that silently does nothing in one
+    // environment and everything in another is how it ends up live.
+    withEnv(
+      { TWILIO_AUTH_TOKEN: AUTH_TOKEN, TWILIO_SKIP_SIGNATURE_CHECK: 'true', NODE_ENV: 'production' },
+      () => {
+        assert.throws(
+          () => requireValidTwilioSignature({ signature: 'nope', url, params }),
+          /production build/,
+        );
+      },
+    );
+  });
+
+  it('does not weaken a valid signature path', () => {
+    const signature = createHmac('sha1', AUTH_TOKEN)
+      .update(Buffer.from(url + 'BodyhelloMessageSidSM123', 'utf8'))
+      .digest('base64');
+    withEnv(
+      { TWILIO_AUTH_TOKEN: AUTH_TOKEN, TWILIO_SKIP_SIGNATURE_CHECK: undefined, NODE_ENV: 'development' },
+      () => {
+        assert.doesNotThrow(() => requireValidTwilioSignature({ signature, url, params }));
+      },
+    );
   });
 });
