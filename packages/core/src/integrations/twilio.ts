@@ -185,6 +185,25 @@ export function validateTwilioSignature(input: {
 
   const expected = createHmac('sha1', authToken).update(Buffer.from(payload, 'utf8')).digest('base64');
 
+  /*
+   * At debug level only, the exact string that was signed.
+   *
+   * When the URL, the token and the algorithm have all been eliminated, the only
+   * remaining suspect is the parameter set — and nothing short of the literal payload
+   * shows a difference of one character. Twilio's own validator can be run against
+   * this to find it.
+   *
+   * Off by default because it contains the message body. Enable with LOG_LEVEL=debug
+   * on a machine handling your own test traffic, not on a tenant's.
+   */
+  logger.debug('Twilio signature payload', {
+    payload,
+    payloadLength: payload.length,
+    sortedKeys: sortedKeys.join(','),
+    expected,
+    presented: input.signature,
+  });
+
   const presented = Buffer.from(input.signature, 'utf8');
   const computed = Buffer.from(expected, 'utf8');
   if (presented.length !== computed.length) return false;
