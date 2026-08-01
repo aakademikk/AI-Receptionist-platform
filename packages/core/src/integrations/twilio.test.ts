@@ -102,7 +102,14 @@ describe('reconstructTwilioUrl', () => {
  */
 const AUTH_TOKEN = 'my_auth_token_1234567890abcdef12';
 
-const VECTORS = [
+interface SignatureVector {
+  name: string;
+  url: string;
+  params: Record<string, string>;
+  expected: string;
+}
+
+const VECTORS: SignatureVector[] = [
   { name: 'a plain inbound SMS', url: 'https://tunnel.example.com/api/webhooks/twilio/sms', params: { MessageSid: 'SM123', From: '+447700900123', To: '+441134960001', Body: 'hello' }, expected: 'Gv/5gWvTi9U2mLHrbyASTe0wExA=' },
   { name: 'a URL carrying a query string', url: 'https://tunnel.example.com/api/webhooks/twilio/sms?x=1', params: { From: '+447700900123', Body: 'hi there' }, expected: 'wT+6U+RZuwp6IaMipzeSPOS5F9Y=' },
   { name: 'a body with unicode and punctuation', url: 'https://tunnel.example.com/api/webhooks/twilio/sms', params: { Body: "Ben's café — 50% off?", From: '+447700900123' }, expected: '6FLE5ICsFJ/wNMFnkfXfvI6OHO4=' },
