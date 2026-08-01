@@ -87,6 +87,16 @@ for (const stray of ['.env.local.txt', '.env.txt']) {
   }
 }
 
+// Read the file directly first: once loadEnvConfig runs, process.env cannot tell us
+// which values came from the file and which were already there.
+const fileValues = new Map();
+if (existsSync(appLocal)) {
+  for (const line of readFileSync(appLocal, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (m) fileValues.set(m[1], m[2].trim().replace(/^["']|["']$/g, ''));
+  }
+}
+
 /* -- 2. Resolve the way Next does ------------------------------------------------- */
 
 const require_ = createRequire(path.join(APP_DIR, 'package.json'));
@@ -201,6 +211,28 @@ if (service.startsWith('sb_publishable_')) {
   problems.push(
     'SUPABASE_SERVICE_ROLE_KEY holds a publishable key (sb_publishable_…). It cannot ' +
       'bypass RLS, so the internal API will fail on every write. Use the Secret key.',
+  );
+}
+
+/*
+ * A variable already present in the real environment wins over every .env file --
+ * Next.js sets, it does not overwrite. So a value exported in a shell or set
+ * machine-wide silently beats the file, and every check that reads the file agrees
+ * with a value the app is not using. Comparing the two is the only way to see it.
+ */
+const shellOverrides = [];
+for (const name of [...REQUIRED, ...OPTIONAL]) {
+  const fromFile = fileValues.get(name);
+  const inUse = process.env[name];
+  if (fromFile !== undefined && inUse !== undefined && fromFile !== inUse) {
+    shellOverrides.push(name);
+  }
+}
+if (shellOverrides.length) {
+  problems.push(
+    `Set in the environment and overriding apps/web/.env.local: ${shellOverrides.join(', ')}. ` +
+      'Next.js never overwrites a variable that is already set, so the file is being ignored ' +
+      'for these. Clear them in this shell (`$env:NAME = $null`) or machine-wide, then restart.',
   );
 }
 

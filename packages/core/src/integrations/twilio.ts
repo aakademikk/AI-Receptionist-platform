@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 import { serverEnv } from '../env.ts';
 import { AppError, badRequest } from '../utils/errors.ts';
@@ -282,14 +282,29 @@ export function requireValidTwilioSignature(input: Parameters<typeof validateTwi
      * diagnostic thing available here.
      */
     const authToken = serverEnv.twilioAuthToken;
+    /*
+     * A fingerprint rather than the token. Twelve hex characters of a SHA-256 is
+     * enough to compare against the value in your .env file — hash it the same way
+     * and see whether they agree — while revealing nothing usable: the token itself
+     * is not recoverable from it.
+     *
+     * This exists because the token the app reads and the token in the file are not
+     * necessarily the same value. Next.js does not overwrite a variable already
+     * present in the real environment, so a shell or machine-level
+     * TWILIO_AUTH_TOKEN silently wins over .env.local, and every other check --
+     * length, the file's contents, even a successful API call with the file's value
+     * -- agrees with a token the app is not using.
+     */
+    const fingerprint = createHash('sha256').update(authToken).digest('hex').slice(0, 12);
     logger.warn('Rejected a Twilio webhook with an invalid signature', {
       url: input.url,
       authTokenLength: authToken.length,
+      authTokenFingerprint: fingerprint,
       signaturePresent: Boolean(input.signature),
       paramCount: Object.keys(input.params).length,
       hint:
         authToken.length === 32
-          ? 'Token length looks right — check the URL matches Twilio exactly, and that the number is not on a subaccount with its own token.'
+          ? 'Token length looks right. Compare authTokenFingerprint against sha256 of the token in your .env file — if they differ, a shell or machine-level TWILIO_AUTH_TOKEN is overriding it, because Next.js never overwrites a variable already set in the real environment.'
           : `Expected a 32-character auth token, got ${authToken.length}. Check TWILIO_AUTH_TOKEN for a truncated paste or stray whitespace.`,
     });
     throw new AppError('forbidden', 403, 'Invalid Twilio signature', {
