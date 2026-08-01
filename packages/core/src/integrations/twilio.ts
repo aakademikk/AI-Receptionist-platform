@@ -193,6 +193,68 @@ export function validateTwilioSignature(input: {
 }
 
 /**
+ * Rebuild the public URL Twilio signed.
+ *
+ * The signature covers the exact URL configured in the Twilio console, so validation
+ * has to reproduce it byte for byte. Two things get in the way, and both are handled
+ * here rather than at each call site:
+ *
+ *  * **TLS termination.** A proxy or tunnel forwards the original scheme and host in
+ *    `x-forwarded-*`; without those, `request.url` reports `http://localhost:3000`
+ *    and every signature fails in a way that looks like a bad auth token.
+ *  * **A tunnel that rewrites Host to the origin**, which is what a quick tunnel does
+ *    by default. Nothing in the headers can recover a value that was never sent, so
+ *    `TWILIO_WEBHOOK_BASE_URL` supplies it explicitly and wins when set.
+ *
+ * The origin is rebuilt rather than patched onto the existing URL. Assigning to
+ * `url.host` leaves the current port in place when the new value has none — so a
+ * request that arrived on `localhost:3000` keeps `:3000` in the reconstructed public
+ * URL, producing `https://tunnel.example.com:3000/...` against a signature computed
+ * over a URL with no port at all. Building from a fresh origin cannot do that, and a
+ * host that legitimately carries a port still keeps it.
+ */
+export function reconstructTwilioUrl(input: {
+  requestUrl: string;
+  forwardedProto?: string | null;
+  forwardedHost?: string | null;
+  host?: string | null;
+  baseUrlOverride?: string | null;
+}): string {
+  const original = new URL(input.requestUrl);
+
+  if (input.baseUrlOverride) {
+    try {
+      const base = new URL(input.baseUrlOverride);
+      return withOrigin(original, base.protocol, base.host);
+    } catch {
+      logger.warn('TWILIO_WEBHOOK_BASE_URL is not a valid URL; falling back to headers', {
+        value: input.baseUrlOverride,
+      });
+    }
+  }
+
+  // A proxy chain appends rather than replaces, so the client-supplied value is first.
+  const firstOf = (value: string | null | undefined): string | undefined =>
+    value ? value.split(',')[0]!.trim() || undefined : undefined;
+
+  const protocol = firstOf(input.forwardedProto);
+  const host = firstOf(input.forwardedHost) ?? firstOf(input.host);
+
+  return withOrigin(
+    original,
+    protocol ? `${protocol}:` : original.protocol,
+    host ?? original.host,
+  );
+}
+
+function withOrigin(original: URL, protocol: string, host: string): string {
+  const rebuilt = new URL(`${protocol}//${host}`);
+  rebuilt.pathname = original.pathname;
+  rebuilt.search = original.search;
+  return rebuilt.toString();
+}
+
+/**
  * Throwing wrapper for route handlers.
  *
  * 403 rather than 401: the caller did present a credential, it simply did not

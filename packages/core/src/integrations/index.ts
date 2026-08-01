@@ -4,6 +4,7 @@ export {
   buildHangupTwiml,
   validateTwilioSignature,
   requireValidTwilioSignature,
+  reconstructTwilioUrl,
   parseTwilioForm,
   parseInboundMessage,
   parseInboundCall,

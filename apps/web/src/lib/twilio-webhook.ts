@@ -1,4 +1,4 @@
-import { logger, serverEnv, toAppError } from '@atwood/core';
+import { logger, reconstructTwilioUrl, serverEnv, toAppError } from '@atwood/core';
 
 /**
  * Error mapping for the Twilio webhook routes.
@@ -67,48 +67,16 @@ function escapeXmlComment(message: string): string {
 }
 
 /**
- * Rebuild the URL Twilio signed.
- *
- * Vercel and most proxies terminate TLS and forward the original scheme and host in
- * `x-forwarded-*`. Without honouring those, `request.url` reports `http` and the
- * signature payload differs from what Twilio hashed, so every request is rejected —
- * a failure that looks like a bad auth token rather than a proxy detail.
- *
- * This lives here rather than in a `route.ts` because a route file is meant to export
- * HTTP method handlers; anything else it exports is an accident of convenience that
- * a future Next.js version is entitled to reject.
+ * Adapt a Next `Request` to the core reconstruction, which holds the actual rules and
+ * is unit-tested. Only the header extraction lives here, because only that part
+ * depends on the framework.
  */
 export function reconstructUrl(request: Request): string {
-  const original = new URL(request.url);
-
-  /*
-   * An explicit override wins over the headers. A tunnel that rewrites Host to the
-   * origin — which is what a quick tunnel does — leaves the app rebuilding
-   * `http://localhost:3000/...` and rejecting every request as a bad signature, and no
-   * amount of header inspection recovers a value that was never forwarded.
-   *
-   * Only scheme and host are taken; path and query still come from the request, so one
-   * setting covers every webhook route.
-   */
-  const override = serverEnv.twilioWebhookBaseUrl;
-  if (override) {
-    try {
-      const base = new URL(override);
-      original.protocol = base.protocol;
-      original.host = base.host;
-      return original.toString();
-    } catch {
-      logger.warn('TWILIO_WEBHOOK_BASE_URL is not a valid URL; falling back to headers', {
-        value: override,
-      });
-    }
-  }
-
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  const forwardedHost = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-
-  if (forwardedProto) original.protocol = `${forwardedProto.split(',')[0]!.trim()}:`;
-  if (forwardedHost) original.host = forwardedHost.split(',')[0]!.trim();
-
-  return original.toString();
+  return reconstructTwilioUrl({
+    requestUrl: request.url,
+    forwardedProto: request.headers.get('x-forwarded-proto'),
+    forwardedHost: request.headers.get('x-forwarded-host'),
+    host: request.headers.get('host'),
+    baseUrlOverride: serverEnv.twilioWebhookBaseUrl ?? null,
+  });
 }
