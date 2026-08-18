@@ -108,7 +108,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold">Settings</h1>
+        <h1 className="text-gradient text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
           {editable
             ? 'Changes take effect on the next incoming message.'
@@ -299,12 +299,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
               rows={5}
               defaultValue={((settings?.['handover_keywords'] as string[] | null) ?? []).join('\n')}
               disabled={!editable}
-              className="w-full rounded-lg border px-3 py-2 text-[13px]"
-              style={{
-                background: 'var(--surface-2)',
-                borderColor: 'var(--border-strong)',
-                color: 'var(--text-primary)',
-              }}
+              className="control w-full px-3 py-2 text-[13px] disabled:opacity-60"
             />
           </Field>
 
@@ -409,12 +404,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className="w-full rounded-lg border px-3 py-2 text-[13px] disabled:opacity-60"
-      style={{
-        background: 'var(--surface-2)',
-        borderColor: 'var(--border-strong)',
-        color: 'var(--text-primary)',
-      }}
+      className="control w-full px-3 py-2 text-[13px] disabled:opacity-60"
     />
   );
 }
@@ -426,12 +416,7 @@ function Select({
   return (
     <select
       {...props}
-      className="w-full rounded-lg border px-3 py-2 text-[13px] disabled:opacity-60"
-      style={{
-        background: 'var(--surface-2)',
-        borderColor: 'var(--border-strong)',
-        color: 'var(--text-primary)',
-      }}
+      className="control w-full px-3 py-2 text-[13px] disabled:opacity-60"
     >
       {options.map(([value, label]) => (
         <option key={value} value={value}>

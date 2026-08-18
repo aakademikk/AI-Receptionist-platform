@@ -79,7 +79,7 @@ export default async function ConversationPage({
           >
             ← All conversations
           </a>
-          <h1 className="mt-1 text-xl font-semibold">
+          <h1 className="text-gradient mt-1 text-2xl font-semibold tracking-tight">
             {conversation.customer_name ??
               formatPhoneForDisplay(conversation.customer_phone) ??
               'Unknown caller'}
@@ -140,13 +140,18 @@ export default async function ConversationPage({
                   className={`flex ${isCustomer ? 'justify-start' : 'justify-end'}`}
                 >
                   <div
-                    className="max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed"
+                    className="max-w-[80%] rounded-2xl border px-3.5 py-2.5 text-[13px] leading-relaxed"
                     style={{
                       background: isCustomer
                         ? 'var(--surface-2)'
                         : isSystem
                           ? 'color-mix(in oklab, var(--status-warning) 12%, var(--surface-2))'
                           : 'color-mix(in oklab, var(--brand-accent) 12%, var(--surface-2))',
+                      borderColor: isSystem
+                        ? 'color-mix(in oklab, var(--status-warning) 26%, transparent)'
+                        : isCustomer
+                          ? 'rgba(255,255,255,0.06)'
+                          : 'var(--edge)',
                       color: 'var(--text-primary)',
                     }}
                   >

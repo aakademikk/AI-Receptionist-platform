@@ -51,7 +51,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ slug:
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold">Overview</h1>
+        <h1 className="text-gradient text-2xl font-semibold tracking-tight">Overview</h1>
         <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
           Today so far, in {tenant.theme.tradingName ?? tenant.name}&rsquo;s local time.
         </p>
@@ -59,12 +59,12 @@ export default async function OverviewPage({ params }: { params: Promise<{ slug:
 
       {/* Time-critical first. */}
       {queue.length > 0 ? (
-        <Card padded={false}>
-          <div className="p-5 pb-0">
-            <CardHeader
-              title="Waiting for a person"
-              description="The assistant has stepped back on these. Oldest first."
-            />
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-[15px] font-semibold">Waiting for a person</h2>
+            <p className="mt-0.5 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
+              The assistant has stepped back on these. Oldest first.
+            </p>
           </div>
           <TableShell>
             <thead>
@@ -103,7 +103,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ slug:
               ))}
             </tbody>
           </TableShell>
-        </Card>
+        </div>
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

@@ -61,7 +61,7 @@ export default async function KnowledgePage({ params }: { params: Promise<{ slug
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold">Knowledge</h1>
+        <h1 className="text-gradient text-2xl font-semibold tracking-tight">Knowledge</h1>
         <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
           Exactly what your assistant has been told. It will not offer a service or a
           price that is not on this page.
