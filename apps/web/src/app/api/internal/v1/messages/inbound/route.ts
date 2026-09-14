@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import {
+  classifySelfMessage,
   getAdminClient,
   handleInboundMessage,
   logger,
@@ -15,6 +16,7 @@ import {
   withInternalAuth,
   type InternalAuthContext,
 } from '@/lib/internal-auth';
+import { publicOrigin } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/internal/v1/messages/inbound
@@ -37,12 +39,41 @@ export const POST = withInternalAuth(async (request: Request, auth: InternalAuth
 
   const channel: CommsChannel = body.channel === 'whatsapp' ? 'whatsapp' : 'sms';
 
+  const toNumber = requireString(body.to_number, 'to_number');
+  const fromNumber = requireString(body.from_number, 'from_number');
+  // An empty body is legitimate — an MMS or a WhatsApp image arrives with no text —
+  // so this is not `requireString`.
+  const text = typeof body.body === 'string' ? body.body : '';
+
+  /*
+   * Self-addressed guard.
+   *
+   * Twilio will deliver a message from a number to that same number, so a reply the
+   * platform sends to its own line comes back as an inbound message — which would be
+   * answered, and answered again, indefinitely, billing a pair of segments on every
+   * turn. A customer cannot start this (they cannot send *from* our number), but the
+   * watchdog probe deliberately does, which is why a marked probe is allowed through
+   * and anything else self-addressed is dropped. The model's reply never carries the
+   * marker, so the chain stops at the first hop while the probe still gets one
+   * genuine round trip.
+   *
+   * Applied before the pipeline rather than inside it, so a loop leaves no contact,
+   * conversation or message rows behind.
+   */
+  const verdict = classifySelfMessage(toNumber, fromNumber, text);
+
+  if (verdict === 'loop') {
+    logger.warn('Dropped a self-addressed inbound message (loop guard)', {
+      traceId: auth.traceId,
+      channel,
+    });
+    return NextResponse.json({ trace_id: auth.traceId, ignored: true, reason: 'self_addressed' });
+  }
+
   const result = await handleInboundMessage({
-    toNumber: requireString(body.to_number, 'to_number'),
-    fromNumber: requireString(body.from_number, 'from_number'),
-    // An empty body is legitimate — an MMS or a WhatsApp image arrives with no text —
-    // so this is not `requireString`.
-    body: typeof body.body === 'string' ? body.body : '',
+    toNumber,
+    fromNumber,
+    body: text,
     channel,
     providerMessageId:
       typeof body.provider_message_id === 'string' ? body.provider_message_id : null,
@@ -97,7 +128,7 @@ export const POST = withInternalAuth(async (request: Request, auth: InternalAuth
       from: result.reply.fromNumber,
       body: result.reply.body,
       channel: result.reply.channel === 'whatsapp' ? 'whatsapp' : 'sms',
-      statusCallbackUrl: `${new URL(request.url).origin}/api/webhooks/twilio/status`,
+      statusCallbackUrl: `${publicOrigin(request)}/api/webhooks/twilio/status`,
       // Keyed on the inbound message, so a replayed n8n execution reuses the same
       // Twilio message rather than sending a second reply.
       idempotencyKey: `reply:${result.inboundMessageId}`,

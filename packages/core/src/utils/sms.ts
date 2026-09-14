@@ -64,36 +64,94 @@ export interface TrimResult {
 }
 
 /**
+ * What `char` costs in `encoding`, counted the way measureSms counts: septets
+ * for GSM-7 (two for the extended set), UTF-16 code units for UCS-2 (two for
+ * an astral character such as an emoji).
+ */
+function unitCost(char: string, encoding: SmsEncoding): number {
+  if (encoding === 'UCS-2') return char.codePointAt(0)! > 0xffff ? 2 : 1;
+  if (GSM_BASIC.includes(char)) return 1;
+  return GSM_EXTENDED.includes(char) ? 2 : 0;
+}
+
+/**
+ * The longest prefix of `body` that still costs `budget` units or fewer.
+ *
+ * This walks code points instead of slicing by count, because the two are not
+ * the same thing: an emoji is one code point but two UCS-2 units, so a
+ * `[...body].slice(0, budget)` overruns the budget on any body containing one.
+ */
+function takeWithin(body: string, budget: number, encoding: SmsEncoding): string {
+  let used = 0;
+  let taken = '';
+  for (const char of body) {
+    const cost = unitCost(char, encoding);
+    if (used + cost > budget) break;
+    used += cost;
+    taken += char;
+  }
+  return taken;
+}
+
+/**
  * Trim a reply to at most `maxSegments`, cutting at a sentence boundary where
  * possible so the result still reads as a finished thought rather than a
  * mid-word truncation.
  */
 export function trimToSegments(body: string, maxSegments: number): TrimResult {
   const initial = measureSms(body);
-  if (initial.segments <= maxSegments) {
+  const cap = Math.max(maxSegments, 1);
+
+  if (initial.segments <= cap) {
     return { body, wasTrimmed: false, metrics: initial };
   }
 
-  const limit = charBudgetForSegments(initial.encoding, maxSegments);
-  const chars = [...body];
-  let candidate = chars.slice(0, limit).join('');
+  const limit = charBudgetForSegments(initial.encoding, cap);
+
+  // The ellipsis has to be paid for out of the budget it is appended to, and it
+  // has to be a character the encoding can already carry. U+2026 is not in
+  // GSM-7, so appending it to a GSM-7 body re-encodes the entire message to
+  // UCS-2 — 67 units per segment instead of 153 — and a body trimmed to fit two
+  // segments arrives as five. Three ASCII dots cost two extra septets and keep
+  // the message in GSM-7, which is much the cheaper trade.
+  const ellipsis = initial.encoding === 'GSM-7' ? '...' : '…';
+  const headroom = Math.max(limit - ellipsis.length, 0);
+
+  const candidate = takeWithin(body, headroom, initial.encoding);
 
   // Prefer the last sentence end, but only if it keeps a useful amount of the
   // message — cutting 200 characters back to 20 is worse than a clean hard cut.
+  // Both thresholds are measured against the candidate's own budget, so they
+  // describe the fraction of the message kept rather than an absolute length.
   const lastSentenceEnd = Math.max(
     candidate.lastIndexOf('. '),
     candidate.lastIndexOf('? '),
     candidate.lastIndexOf('! '),
   );
-  if (lastSentenceEnd > limit * 0.5) {
-    candidate = candidate.slice(0, lastSentenceEnd + 1);
+
+  let trimmed: string;
+  if (lastSentenceEnd > headroom * 0.5) {
+    trimmed = candidate.slice(0, lastSentenceEnd + 1);
   } else {
     const lastSpace = candidate.lastIndexOf(' ');
-    if (lastSpace > limit * 0.7) candidate = `${candidate.slice(0, lastSpace)}…`;
+    if (lastSpace > headroom * 0.7) {
+      trimmed = `${candidate.slice(0, lastSpace)}${ellipsis}`;
+    } else {
+      // Neither a sentence end nor a usable word break in the back half. The
+      // remaining case is one long unbroken run — a URL, a reference number — so
+      // the cut lands mid-token. Mark it: without the ellipsis the customer gets a
+      // text that simply stops mid-word and has no way to know it was cut, which is
+      // the failure this whole function exists to avoid.
+      trimmed = `${candidate}${ellipsis}`;
+    }
   }
 
-  const trimmed = candidate.trim();
-  return { body: trimmed, wasTrimmed: true, metrics: measureSms(trimmed) };
+  // Every branch above returns a body costing limit units or fewer — a prefix of
+  // the candidate costs no more than the candidate, and the ellipsis was paid for
+  // out of the same budget — so the result cannot exceed the cap. The tests
+  // assert that rather than trusting this comment.
+  const result = trimmed.trim();
+  return { body: result, wasTrimmed: true, metrics: measureSms(result) };
 }
 
 function charBudgetForSegments(encoding: SmsEncoding, segments: number): number {

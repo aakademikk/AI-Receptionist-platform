@@ -260,6 +260,26 @@ export const serverEnv = {
     return optional('TWILIO_MESSAGING_SERVICE_SID');
   },
 
+  /**
+   * API host to call, for accounts that are not homed in the default US region.
+   *
+   * Twilio's regional accounts (ie1, au1) keep their data — calls, messages, and the
+   * phone number's own webhook config — in that region, and serve it only from that
+   * region's edge. The global `api.twilio.com` answers for a regional account's
+   * credentials with a 401, and reads against it return a *different*, non-routing
+   * view of the same resources: a call log missing every real call, and number
+   * configuration that can be written successfully yet never takes effect.
+   *
+   * That failure is silent and extremely expensive to diagnose, because every write
+   * reports success. Set this to the account's regional base — for Ireland,
+   * `https://api.dublin.ie1.twilio.com/2010-04-01` — and every API call follows.
+   *
+   * Defaults to the global host, so an account in the default region needs nothing.
+   */
+  get twilioApiBaseUrl(): string {
+    return optional('TWILIO_API_BASE_URL', 'https://api.twilio.com/2010-04-01')!.replace(/\/+$/, '');
+  },
+
   get firecrawlApiKey(): string | undefined {
     assertServer('FIRECRAWL_API_KEY');
     return optional('FIRECRAWL_API_KEY');

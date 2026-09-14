@@ -17,6 +17,7 @@ import {
   withInternalAuth,
   type InternalAuthContext,
 } from '@/lib/internal-auth';
+import { publicOrigin } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/internal/v1/messages/send
@@ -108,7 +109,7 @@ export const POST = withInternalAuth(async (request: Request, auth: InternalAuth
       from: fromNumber,
       body: text,
       channel: conversation.channel === 'whatsapp' ? 'whatsapp' : 'sms',
-      statusCallbackUrl: `${new URL(request.url).origin}/api/webhooks/twilio/status`,
+      statusCallbackUrl: `${publicOrigin(request)}/api/webhooks/twilio/status`,
       // The message row id is a natural idempotency key: a retry that reuses it
       // cannot produce a second Twilio message.
       ...(messageId ? { idempotencyKey: `send:${messageId}` } : {}),

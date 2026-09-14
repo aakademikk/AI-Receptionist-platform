@@ -58,3 +58,10 @@ export {
 } from './pipeline.ts';
 
 export { runOnboarding, applyOnboarding } from './onboarding.ts';
+
+export {
+  classifySelfMessage,
+  isSamePhoneNumber,
+  WATCHDOG_PROBE_MARKER,
+  type SelfMessageVerdict,
+} from './self-message.ts';

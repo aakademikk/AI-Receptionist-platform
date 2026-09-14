@@ -136,18 +136,27 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
 
   const cleaned = cleanModelReply(result.text);
 
-  if (cleaned === '') {
-    // Truncation is the usual cause: thinking consumed the whole token budget.
-    // Surfacing it as a refusal-shaped outcome routes it to a human rather than
-    // sending an empty SMS.
-    log.error('Model produced no usable reply text', {
+  // Truncation is not only an empty-reply problem. A model that runs out of tokens
+  // mid-sentence still returns text that reads like a reply, and the customer has
+  // no way to tell it was cut off — half a sentence is worse than none, because
+  // they will act on it. Escalate either way and let a person finish the thought.
+  if (result.truncated) {
+    log.error('Model reply was truncated; escalating instead of sending part of a message', {
       stopReason: result.stopReason,
-      truncated: result.truncated,
+      producedText: cleaned !== '',
     });
     throw providerRefused({
-      reason: result.truncated
-        ? 'Response was truncated before any text was produced — ai_max_output_tokens is likely too low.'
-        : 'Model returned an empty reply.',
+      reason: 'Response was truncated before it finished — ai_max_output_tokens is likely too low.',
+      stopReason: result.stopReason,
+    });
+  }
+
+  if (cleaned === '') {
+    // A model can also return nothing at all. Surfacing it as a refusal-shaped
+    // outcome routes it to a human rather than sending an empty SMS.
+    log.error('Model produced no usable reply text', { stopReason: result.stopReason });
+    throw providerRefused({
+      reason: 'Model returned an empty reply.',
       stopReason: result.stopReason,
     });
   }

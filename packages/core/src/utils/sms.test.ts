@@ -57,6 +57,73 @@ describe('trimToSegments', () => {
     const result = trimToSegments(body, 1);
     assert.ok(result.body.endsWith('.'), `expected a sentence end, got "${result.body.slice(-20)}"`);
   });
+
+  // The three tests above all contain a sentence end, so they only ever exercise
+  // the branch that appends nothing. The ellipsis branches were therefore
+  // untested, and a fault lived there: U+2026 is not in the GSM-7 alphabet, so
+  // appending it re-encoded the whole body to UCS-2 — 67 units per segment
+  // instead of 153 — and a body trimmed to fit two segments came out as five.
+  // These assert the ceiling itself, which is what the function is for.
+
+  it('keeps a GSM-7 body in GSM-7 when it appends an ellipsis', () => {
+    // No sentence end, so the word-break branch runs.
+    const body = 'word '.repeat(200).trim();
+    const result = trimToSegments(body, 2);
+    assert.equal(result.metrics.encoding, 'GSM-7');
+    assert.ok(result.body.endsWith('...'), `expected ASCII dots, got "${result.body.slice(-10)}"`);
+  });
+
+  it('keeps a GSM-7 body in GSM-7 on the hard-cut branch', () => {
+    // Neither a sentence end nor a usable space in the back half.
+    const body = `Hi there ${'A'.repeat(600)}`;
+    const result = trimToSegments(body, 2);
+    assert.equal(result.metrics.encoding, 'GSM-7');
+    assert.ok(result.body.endsWith('...'), `expected ASCII dots, got "${result.body.slice(-10)}"`);
+  });
+
+  it('uses a single-character ellipsis when the body is already UCS-2', () => {
+    const body = 'we manage blocks—and estates here '.repeat(30).trim();
+    const result = trimToSegments(body, 2);
+    assert.equal(result.metrics.encoding, 'UCS-2');
+    assert.ok(result.body.endsWith('…'), `expected U+2026, got "${result.body.slice(-10)}"`);
+  });
+
+  it('never returns more segments than it was asked for', () => {
+    // The assertion the missing tests should have made. Bodies are chosen to hit
+    // every branch: sentence end, word break, hard cut, and both encodings.
+    const bodies = [
+      'A'.repeat(600),
+      'word '.repeat(200).trim(),
+      'Short sentence here. '.repeat(30).trim(),
+      `https://example.com/${'a'.repeat(300)}`,
+      'we manage blocks—and estates here '.repeat(30).trim(),
+      '\u{1F600} let me help you today '.repeat(20).trim(),
+      'It’s fine, we can help you there '.repeat(30).trim(),
+    ];
+
+    for (const body of bodies) {
+      for (const cap of [1, 2, 3, 5]) {
+        const result = trimToSegments(body, cap);
+        assert.ok(
+          result.metrics.segments <= cap,
+          `asked for ${cap} segments, got ${result.metrics.segments} (${result.metrics.encoding})`,
+        );
+      }
+    }
+  });
+
+  it('counts astral characters as two units when trimming', () => {
+    // An emoji is one code point but two UCS-2 units, so a slice by code-point
+    // count would overrun the budget on any body containing one.
+    const body = '\u{1F600} let me help you today '.repeat(20).trim();
+    const result = trimToSegments(body, 2);
+    assert.ok(result.metrics.segments <= 2, `expected <=2 segments, got ${result.metrics.segments}`);
+  });
+
+  it('treats a cap below one segment as one segment', () => {
+    const result = trimToSegments('word '.repeat(200).trim(), 0);
+    assert.ok(result.metrics.segments <= 1, `expected <=1 segment, got ${result.metrics.segments}`);
+  });
 });
 
 describe('cleanModelReply', () => {
