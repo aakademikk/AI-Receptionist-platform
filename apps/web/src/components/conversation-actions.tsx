@@ -95,12 +95,7 @@ export function ConversationActions({
           onChange={(event) => setBody(event.target.value)}
           rows={3}
           placeholder="Reply as your team…"
-          className="w-full rounded-lg border px-3 py-2 text-[13px]"
-          style={{
-            background: 'var(--surface-2)',
-            borderColor: 'var(--border-strong)',
-            color: 'var(--text-primary)',
-          }}
+          className="control w-full px-3 py-2 text-[13px]"
         />
         <div className="flex items-center justify-between gap-3">
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>

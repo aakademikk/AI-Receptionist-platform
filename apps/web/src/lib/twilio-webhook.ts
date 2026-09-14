@@ -67,6 +67,20 @@ function escapeXmlComment(message: string): string {
 }
 
 /**
+ * A successful TwiML response.
+ *
+ * Always 200. Twilio reads the body to decide what to do next, and any non-2xx
+ * makes it retry the same request — so a handler that has nothing to say still
+ * answers 200 with empty `<Response/>` rather than an error status.
+ */
+export function twiml(body: string): Response {
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'text/xml; charset=utf-8' },
+  });
+}
+
+/**
  * Adapt a Next `Request` to the core reconstruction, which holds the actual rules and
  * is unit-tested. Only the header extraction lives here, because only that part
  * depends on the framework.
@@ -79,4 +93,21 @@ export function reconstructUrl(request: Request): string {
     host: request.headers.get('host'),
     baseUrlOverride: serverEnv.twilioWebhookBaseUrl ?? null,
   });
+}
+
+/**
+ * The origin Twilio must use to call us back.
+ *
+ * `reconstructUrl`'s problem one step further out: behind the tunnel `request.url`
+ * reports the origin service, so a callback URL built from it reads
+ * `https://localhost:3001/...` — which Twilio will not accept. A message send fails
+ * outright with error 21609 ("StatusCallback URL is not a valid URL"), so no SMS is
+ * created at all.
+ *
+ * `TWILIO_WEBHOOK_BASE_URL` is the public origin by definition where it is set, and
+ * signature validation already trusts it for exactly that reason. Falling back to the
+ * request origin keeps preview deployments — which have no override — working.
+ */
+export function publicOrigin(request: Request): string {
+  return serverEnv.twilioWebhookBaseUrl ?? new URL(request.url).origin;
 }

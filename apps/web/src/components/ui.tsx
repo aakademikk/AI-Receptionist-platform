@@ -7,8 +7,10 @@ import type { ReactNode } from 'react';
  * dashboard is a dozen screens of tables, tiles and forms; a design-system
  * dependency would be more surface area than the whole UI.
  *
- * Everything is styled from the tokens in globals.css, so a tenant's brand colour
- * reaches chrome and nothing else.
+ * Everything is styled from the tokens in globals.css (dark-canvas glassmorphism),
+ * so a tenant's brand colour reaches chrome and nothing else. Panes compose the
+ * reference `.glass .hairline` treatment; data marks and status keep their fixed,
+ * validated colours.
  */
 
 export function Card({
@@ -21,13 +23,7 @@ export function Card({
   padded?: boolean;
 }) {
   return (
-    <section
-      className={`rounded-xl border ${padded ? 'p-5' : ''} ${className}`}
-      style={{
-        background: 'var(--surface-1)',
-        borderColor: 'var(--border-subtle)',
-      }}
-    >
+    <section className={`glass hairline rounded-2xl ${padded ? 'p-5' : ''} ${className}`}>
       {children}
     </section>
   );
@@ -109,19 +105,18 @@ export function StatTile({
     </>
   );
 
-  const className = 'block rounded-xl border p-4 transition-colors';
-  const style = { background: 'var(--surface-1)', borderColor: 'var(--border-subtle)' };
+  const className = 'glass hairline rounded-2xl p-4 transition-colors';
 
   if (href) {
     return (
-      <a href={href} className={`${className} hover:brightness-[0.98]`} style={style}>
+      <a href={href} className={`${className} hover:brightness-[1.04]`}>
         {body}
       </a>
     );
   }
 
   return (
-    <div className={className} style={style}>
+    <div className={className}>
       {body}
     </div>
   );
@@ -230,26 +225,36 @@ export function Badge({
   children: ReactNode;
   tone?: 'neutral' | 'good' | 'warning' | 'critical' | 'info';
 }) {
-  const palette: Record<string, { bg: string; fg: string }> = {
-    neutral: { bg: 'var(--surface-2)', fg: 'var(--text-secondary)' },
-    good: { bg: 'color-mix(in oklab, var(--status-good) 14%, transparent)', fg: 'var(--status-good)' },
+  const palette: Record<string, { bg: string; fg: string; edge: string }> = {
+    neutral: { bg: 'var(--surface-2)', fg: 'var(--text-secondary)', edge: 'rgba(255,255,255,0.08)' },
+    good: {
+      bg: 'color-mix(in oklab, var(--status-good) 14%, transparent)',
+      fg: 'var(--status-good)',
+      edge: 'color-mix(in oklab, var(--status-good) 30%, transparent)',
+    },
     warning: {
       bg: 'color-mix(in oklab, var(--status-warning) 18%, transparent)',
       fg: 'var(--status-warning)',
+      edge: 'color-mix(in oklab, var(--status-warning) 34%, transparent)',
     },
     critical: {
       bg: 'color-mix(in oklab, var(--status-critical) 14%, transparent)',
       fg: 'var(--status-critical)',
+      edge: 'color-mix(in oklab, var(--status-critical) 30%, transparent)',
     },
-    info: { bg: 'color-mix(in oklab, var(--series-1) 14%, transparent)', fg: 'var(--series-1)' },
+    info: {
+      bg: 'color-mix(in oklab, var(--series-1) 14%, transparent)',
+      fg: 'var(--series-1)',
+      edge: 'color-mix(in oklab, var(--series-1) 30%, transparent)',
+    },
   };
 
-  const { bg, fg } = palette[tone] ?? palette['neutral']!;
+  const { bg, fg, edge } = palette[tone] ?? palette['neutral']!;
 
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
-      style={{ background: bg, color: fg }}
+      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
+      style={{ background: bg, color: fg, borderColor: edge }}
     >
       {children}
     </span>
@@ -273,20 +278,8 @@ export function Button({
   formAction?: (formData: FormData) => void | Promise<void>;
   className?: string;
 }) {
-  const styles =
-    variant === 'primary'
-      ? { background: 'var(--brand-accent)', color: '#ffffff', borderColor: 'transparent' }
-      : variant === 'danger'
-        ? {
-            background: 'transparent',
-            color: 'var(--status-critical)',
-            borderColor: 'var(--border-strong)',
-          }
-        : {
-            background: 'var(--surface-1)',
-            color: 'var(--text-primary)',
-            borderColor: 'var(--border-strong)',
-          };
+  const variantClass =
+    variant === 'primary' ? 'btn-primary btn-sm' : variant === 'danger' ? 'btn-danger btn-sm' : 'btn-ghost btn-sm';
 
   return (
     <button
@@ -294,8 +287,7 @@ export function Button({
       disabled={disabled}
       onClick={onClick}
       formAction={formAction}
-      className={`inline-flex items-center justify-center rounded-lg border px-3.5 py-2 text-[13px] font-semibold transition-opacity disabled:opacity-50 ${className}`}
-      style={styles}
+      className={`inline-flex items-center justify-center disabled:opacity-50 ${variantClass} ${className}`}
     >
       {children}
     </button>
@@ -305,8 +297,11 @@ export function Button({
 export function EmptyState({ title, description }: { title: string; description?: string }) {
   return (
     <div
-      className="rounded-xl border border-dashed p-8 text-center"
-      style={{ borderColor: 'var(--border-strong)' }}
+      className="rounded-2xl border border-dashed p-8 text-center"
+      style={{
+        borderColor: 'rgba(255,255,255,0.14)',
+        background: 'rgba(255,255,255,0.02)',
+      }}
     >
       <p className="text-[14px] font-medium" style={{ color: 'var(--text-primary)' }}>
         {title}
@@ -323,13 +318,12 @@ export function EmptyState({ title, description }: { title: string; description?
 /** Table wrapper. Scrolls horizontally in its own container so the page never does. */
 export function TableShell({ children }: { children: ReactNode }) {
   return (
-    <div
-      className="overflow-x-auto rounded-xl border"
-      style={{ background: 'var(--surface-1)', borderColor: 'var(--border-subtle)' }}
-    >
-      <table className="w-full min-w-[640px] border-collapse text-left text-[13px]">
-        {children}
-      </table>
+    <div className="glass hairline overflow-hidden rounded-2xl">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] border-collapse text-left text-[13px]">
+          {children}
+        </table>
+      </div>
     </div>
   );
 }

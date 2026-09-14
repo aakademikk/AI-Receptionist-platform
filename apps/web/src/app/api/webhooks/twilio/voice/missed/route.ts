@@ -3,6 +3,7 @@ import { after } from 'next/server';
 import {
   buildHangupTwiml,
   describeFetchError,
+  isMissedRedirect,
   logger,
   parseInboundCall,
   parseTwilioForm,
@@ -15,7 +16,9 @@ import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
 /**
  * POST /api/webhooks/twilio/voice/missed
  *
- * The `<Dial>` action callback: Twilio reports how the forwarding leg ended.
+ * The action callback for the inbound-call flow: either the `<Dial>` verb reporting how
+ * the forwarding leg ended, or — when the number has no forwarding configured — the
+ * `<Redirect>` target, which arrives marked (`MISSED_REDIRECT_PARAM`).
  *
  * If the call was answered there is nothing to do. If it was missed, this triggers
  * the follow-up SMS — either by handing off to n8n (the documented default, so the
@@ -39,7 +42,19 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
 
   const call = parseInboundCall(params);
 
-  if (!call.isMissed) {
+  // Two genuinely different signals, either of which means nobody picked up:
+  //
+  //  - a `<Dial>` callback reports the forwarding leg's outcome in `DialCallStatus`,
+  //    which `parseInboundCall` reads;
+  //  - a `<Redirect>` has no leg to report. The parent call is still live, so
+  //    `CallStatus` reads `in-progress` and `isMissed` comes out false — those URLs
+  //    carry an explicit marker instead.
+  //
+  // Testing only the first is what silently killed the follow-up SMS on a number with
+  // nowhere to forward to.
+  const missed = call.isMissed || isMissedRedirect(url);
+
+  if (!missed) {
     logger.info('Call was answered; no follow-up needed', {
       callSid: call.callSid,
       dialCallStatus: call.dialCallStatus,

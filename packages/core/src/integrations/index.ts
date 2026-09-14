@@ -1,7 +1,12 @@
 export {
   sendSms,
+  placeCall,
   buildMissedCallTwiml,
   buildHangupTwiml,
+  buildGatherTwiml,
+  MISSED_REDIRECT_PARAM,
+  markMissedRedirect,
+  isMissedRedirect,
   validateTwilioSignature,
   requireValidTwilioSignature,
   reconstructTwilioUrl,
@@ -11,6 +16,8 @@ export {
   mapTwilioStatus,
   type SendSmsInput,
   type SendSmsResult,
+  type PlaceCallInput,
+  type PlaceCallResult,
   type InboundMessagePayload,
   type InboundCallPayload,
 } from './twilio.ts';

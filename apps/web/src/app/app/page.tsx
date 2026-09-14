@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-import { Card, CardHeader, EmptyState } from '@/components/ui';
+import { EmptyState } from '@/components/ui';
 import { listMyBusinesses } from '@/lib/tenant';
 
 /**
@@ -29,14 +29,19 @@ export default async function AppIndex() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-16">
-      <Card>
-        <CardHeader title="Choose a business" description="You have access to more than one." />
+      <div className="mb-8">
+        <h1 className="text-gradient text-2xl font-semibold tracking-tight">Choose a business</h1>
+        <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
+          You have access to more than one.
+        </p>
+      </div>
+      <div className="glass hairline rounded-2xl p-2">
         <ul className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
           {businesses.map((business) => (
             <li key={business.id}>
               <a
                 href={`/app/${business.slug}`}
-                className="flex items-center justify-between py-3 text-[14px] font-medium hover:underline"
+                className="flex items-center justify-between rounded-xl px-3 py-3 text-[14px] font-medium transition-colors hover:bg-white/[0.03]"
               >
                 <span>{business.name}</span>
                 <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
@@ -46,7 +51,7 @@ export default async function AppIndex() {
             </li>
           ))}
         </ul>
-      </Card>
+      </div>
     </main>
   );
 }

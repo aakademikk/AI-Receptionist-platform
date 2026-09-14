@@ -2,6 +2,7 @@ import {
   buildMissedCallTwiml,
   getAdminClient,
   logger,
+  markMissedRedirect,
   normalizePhone,
   parseInboundCall,
   parseTwilioForm,
@@ -81,7 +82,13 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
   return twiml(
     buildMissedCallTwiml({
       forwardTo: number.forward_to,
-      actionUrl,
+      // With nowhere to forward to, every call is missed — and a `<Redirect>` cannot
+      // say so for itself, because Twilio sends no `DialCallStatus` and the parent
+      // call is still live. Marking the URL is how the action callback finds out.
+      //
+      // The two unprovisioned branches above deliberately do *not* mark: a call to a
+      // number we do not own must never trigger a follow-up SMS.
+      actionUrl: number.forward_to ? actionUrl : markMissedRedirect(actionUrl),
       greetingUrl: number.voice_greeting_url,
       timeoutSeconds: 20,
     }),

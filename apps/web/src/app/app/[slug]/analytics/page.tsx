@@ -109,7 +109,7 @@ export default async function AnalyticsPage({
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">Analytics</h1>
+          <h1 className="text-gradient text-2xl font-semibold tracking-tight">Analytics</h1>
           <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
             Last {window} days, from the nightly rollup.
           </p>
@@ -119,12 +119,20 @@ export default async function AnalyticsPage({
             <a
               key={value}
               href={`/app/${slug}/analytics?days=${value}`}
-              className="rounded-md border px-2.5 py-1.5 text-[12px] font-medium"
-              style={{
-                background: String(window) === value ? 'var(--surface-2)' : 'transparent',
-                borderColor: 'var(--border-strong)',
-                color: 'var(--text-secondary)',
-              }}
+              className="rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors"
+              style={
+                String(window) === value
+                  ? {
+                      background: 'color-mix(in srgb, var(--brand-accent) 10%, transparent)',
+                      borderColor: 'var(--edge)',
+                      color: 'var(--brand)',
+                    }
+                  : {
+                      background: 'transparent',
+                      borderColor: 'rgba(255,255,255,0.14)',
+                      color: 'var(--text-secondary)',
+                    }
+              }
             >
               {value}d
             </a>

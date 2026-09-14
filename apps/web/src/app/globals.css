@@ -1,10 +1,14 @@
 @import 'tailwindcss';
 
+@theme {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
 /**
- * Design tokens.
+ * Design tokens — dark-canvas glassmorphism, matching the reference website look.
  *
- * The important rule in this file, and the one that keeps a white-label product
- * legible: there are **two colour systems and they never mix**.
+ * Three colour roles, kept apart:
  *
  *   --brand-*   The tenant's own colours. Applied to chrome only — nav, primary
  *               buttons, links, focus rings, logo lockup. Set at runtime from
@@ -12,90 +16,64 @@
  *               cannot be checked for contrast or colourblind separation.
  *
  *   --series-*  Data marks. A fixed, validated categorical palette, identical for
- *               every tenant.
+ *               every tenant (AI-handled / human-handled). Never tenant-branded.
  *
- * Using the tenant's brand colour for data would mean a chart whose accessibility
- * depends on what a customer typed into a colour picker — one tenant's pale yellow
- * accent would produce an unreadable bar against the surface, and a two-series
- * chart could end up with two indistinguishable hues. Chrome can absorb an
- * eccentric brand colour; an encoding cannot.
+ *   --status-*  Status colours. Reserved; never reused as a series colour.
  *
- * The series values below are slots 1 and 2 of the reference categorical palette,
- * validated for both modes (all-pairs: CVD ΔE 24.7 light / 26.8 dark; normal-vision
- * 33.6 / 31.8; all ≥ 3:1 against their surface).
+ * The brand ramp (`--brand`, `--brand2`, `--brand3`, `--edge`) is derived from the
+ * runtime `--brand-accent` via color-mix, so the whole chrome re-tints per tenant
+ * without any build-time knowledge of the colour. `--brand-rgb` from the reference
+ * is deliberately NOT used at runtime — a tenant colour is unknown at build time,
+ * so tints use color-mix instead of `rgba(var(--brand-rgb), …)`.
+ *
+ * Surface/text token NAMES (`--surface-*`, `--text-*`, `--border-*`) are preserved
+ * from the original light system so every existing inline style keeps resolving;
+ * their VALUES are remapped to the dark canvas/panels/ink.
  */
 
-@theme {
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-}
-
 :root {
-  color-scheme: light;
-
-  /* Surfaces and ink */
-  --surface-0: #f7f7f6;
-  --surface-1: #fcfcfb;
-  --surface-2: #f1f1ef;
-  --border-subtle: #e3e3df;
-  --border-strong: #cdcdc7;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #7a7975;
-
-  /* Data marks — fixed across all tenants. */
-  --series-1: #2a78d6; /* AI-handled */
-  --series-2: #eb6834; /* human-handled */
-
-  /* Status. Reserved; never reused as a series colour. */
-  --status-good: #008300;
-  --status-warning: #eda100;
-  --status-critical: #e34948;
-
-  /* Tenant brand. These defaults are replaced inline per tenant. */
-  --brand-primary: #0f172a;
-  --brand-accent: #2563eb;
-  --brand-foreground: #ffffff;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-
-    --surface-0: #111110;
-    --surface-1: #1a1a19;
-    --surface-2: #232322;
-    --border-subtle: #302f2d;
-    --border-strong: #45443f;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #97968c;
-
-    /* Re-stepped for the dark surface, not an automatic flip of the light values. */
-    --series-1: #3987e5;
-    --series-2: #d95926;
-
-    --status-good: #008300;
-    --status-warning: #c98500;
-    --status-critical: #e66767;
-  }
-}
-
-:root[data-theme='dark'] {
   color-scheme: dark;
 
-  --surface-0: #111110;
-  --surface-1: #1a1a19;
-  --surface-2: #232322;
-  --border-subtle: #302f2d;
-  --border-strong: #45443f;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #97968c;
+  /* Canvas & surfaces — mapped to the reference panels. */
+  --canvas: #090909;
+  --deep: #050505;
+  --panel: #101010;
+  --panel2: #141414;
+  --panel3: #181818;
 
-  --series-1: #3987e5;
-  --series-2: #d95926;
+  /* Kept names so existing markup resolves unchanged. */
+  --surface-0: #090909; /* canvas */
+  --surface-1: #101010; /* panel */
+  --surface-2: #141414; /* panel2 */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #f5f5f5; /* ink */
+  --text-secondary: #b8bcc5; /* muted */
+  --text-muted: #7c818c; /* faint */
 
+  /* Tenant brand. Defaults are the demo tenant (Parkfords); overridden inline on
+     the tenant shell from business_profiles. */
+  --brand-primary: #12324a;
+  --brand-accent: #c9873d;
+  --brand-foreground: #ffffff;
+
+  /* Reference brand ramp — derived from the runtime accent. */
+  --brand: var(--brand-accent);
+  --brand2: color-mix(in srgb, var(--brand-accent) 70%, #ffffff);
+  --brand3: color-mix(in srgb, var(--brand-accent) 60%, #000000);
+  --brand-deep: color-mix(in srgb, var(--brand-accent) 45%, #000000);
+  --edge: color-mix(in srgb, var(--brand-accent) 16%, transparent);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --ink: #f5f5f5;
+  --muted: #b8bcc5;
+  --faint: #7c818c;
+
+  /* Data marks — re-stepped for the dark surface, validated for both modes. */
+  --series-1: #3987e5; /* AI-handled */
+  --series-2: #d95926; /* human-handled */
+
+  /* Status. Reserved; never reused as a series colour. */
   --status-good: #008300;
   --status-warning: #c98500;
   --status-critical: #e66767;
@@ -121,4 +99,228 @@ body {
 /* Tabular figures everywhere a number is compared against another number. */
 .tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Reusable pieces (from the reference design system)
+   ========================================================================== */
+
+.text-gradient {
+  background: linear-gradient(120deg, var(--brand2), var(--brand) 55%, var(--brand3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(20, 20, 20, 0.72), rgba(10, 10, 10, 0.72));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.hairline {
+  position: relative;
+  overflow: hidden;
+}
+
+.hairline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(130deg, var(--edge), rgba(255, 255, 255, 0.05) 40%, transparent 70%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Brand-tinted icon square — the reference's service/feature tiles. */
+.icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--brand-accent) 8%, transparent);
+  border: 1px solid var(--edge);
+  padding: 0.5rem;
+}
+
+.icon-chip svg {
+  stroke: var(--brand);
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.btn-primary,
+.btn-ghost,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.9rem 1.6rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    filter 0.25s var(--ease),
+    transform 0.25s var(--ease),
+    border-color 0.25s var(--ease),
+    background 0.25s var(--ease);
+}
+
+.btn-primary {
+  background: linear-gradient(120deg, var(--brand2), var(--brand));
+  color: color-mix(in srgb, var(--brand-accent) 20%, #000000);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  border-color: var(--edge);
+  background: color-mix(in srgb, var(--brand-accent) 5%, transparent);
+}
+
+.btn-danger {
+  border: 1px solid color-mix(in srgb, var(--status-critical) 40%, transparent);
+  color: var(--status-critical);
+  background: color-mix(in srgb, var(--status-critical) 8%, transparent);
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--status-critical) 14%, transparent);
+}
+
+/* Compact size for dense dashboard controls. */
+.btn-primary.btn-sm,
+.btn-ghost.btn-sm,
+.btn-danger.btn-sm {
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  border-radius: 999px;
+}
+
+.section-title {
+  font-size: clamp(1.7rem, 4vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+/* Scroll reveal. Inactive by default so no-JS never hides content. */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease);
+}
+
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   Form fields — the reference's dark inputs.
+   ========================================================================== */
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.85rem 1rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+  outline: none;
+  transition:
+    border-color 0.25s var(--ease),
+    background 0.25s var(--ease);
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand-accent) 4%, transparent);
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: var(--faint);
+}
+
+.field select option {
+  background: var(--panel2);
+  color: var(--ink);
+}
+
+.field label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* A standalone dark control for filter bars and dense forms — same look as a
+   `.field` input but sized by its container rather than forced full width. */
+.control {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  font-size: 0.9rem;
+  outline: none;
+  transition:
+    border-color 0.25s var(--ease),
+    background 0.25s var(--ease);
+}
+
+.control:focus {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand-accent) 4%, transparent);
+}
+
+.control::placeholder {
+  color: var(--faint);
+}
+
+.control option {
+  background: var(--panel2);
+  color: var(--ink);
 }

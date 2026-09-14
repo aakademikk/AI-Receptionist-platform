@@ -9,15 +9,28 @@ import { logger } from '../utils/logger.ts';
  *
  * Uses the REST API over `fetch` rather than the `twilio` npm package. The SDK is
  * a large dependency that bundles a client for every Twilio product, and we use
- * exactly two endpoints. On a serverless runtime, cold-start size is a real cost.
+ * exactly three endpoints. On a serverless runtime, cold-start size is a real cost.
  *
  * The signature validation below is the more important half of this file: without
  * it, the inbound webhook is an unauthenticated endpoint that will happily accept
  * a forged "customer message" from anyone who can guess a phone number, and bill
  * the tenant for the AI reply.
+ *
+ * `sendSms` and `placeCall` are the two outbound primitives. Everything else here
+ * serves the inbound direction — which is the point of `placeCall` existing at all:
+ * before it, every path in the platform was a reply to something Twilio had already
+ * started.
  */
 
-const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01';
+/*
+ * Read at call time rather than captured once at module load: the base depends on the
+ * account's home region (see `serverEnv.twilioApiBaseUrl`), and a module-level const
+ * freezes whatever the environment held when the module was first imported, which is
+ * how a stale value survives a config change and looks like a credential fault.
+ */
+function twilioApiBase(): string {
+  return serverEnv.twilioApiBaseUrl;
+}
 
 export interface SendSmsInput {
   to: string;
@@ -75,7 +88,7 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   };
   if (input.idempotencyKey) headers['I-Twilio-Idempotency-Token'] = input.idempotencyKey;
 
-  const response = await fetch(`${TWILIO_API_BASE}/Accounts/${accountSid}/Messages.json`, {
+  const response = await fetch(`${twilioApiBase()}/Accounts/${accountSid}/Messages.json`, {
     method: 'POST',
     headers,
     body: form,
@@ -103,6 +116,123 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
     status: String(payload['status']),
     segments: toNumber(payload['num_segments']),
     // Twilio reports price as a negative string ("-0.0075"); store the magnitude.
+    priceAmount: payload['price'] === null ? null : Math.abs(toNumber(payload['price']) ?? 0),
+    priceCurrency: typeof payload['price_unit'] === 'string' ? payload['price_unit'] : null,
+  };
+}
+
+export interface PlaceCallInput {
+  /** E.164. The callee. */
+  to: string;
+  /** E.164. Must be a number this account owns and is voice-capable. */
+  from: string;
+  /**
+   * TwiML Twilio fetches the instant the call connects — not when it is placed.
+   * A URL that is unreachable at answer time fails the call rather than the request,
+   * so a 201 here does not mean the call worked.
+   */
+  twimlUrl: string;
+  /** Where Twilio posts call lifecycle events. */
+  statusCallbackUrl?: string;
+  /**
+   * Seconds to ring before giving up. Twilio's default is 60, which for a
+   * confirmation call is 45 seconds of a stranger's phone ringing unattended.
+   */
+  timeoutSeconds?: number;
+  /**
+   * Record both legs. Off by default and deliberately so: recording an outbound
+   * call needs notification and a lawful basis under UK GDPR/PECR, and a default
+   * of "on" would put that obligation on every tenant who never asked for it.
+   */
+  record?: boolean;
+  /** Twilio's own idempotency: repeating this key will not place a second call. */
+  idempotencyKey?: string;
+}
+
+export interface PlaceCallResult {
+  sid: string;
+  /** `queued` on success. Twilio reports the real outcome via the status callback. */
+  status: string;
+  priceAmount: number | null;
+  priceCurrency: string | null;
+}
+
+/**
+ * Place an outbound call.
+ *
+ * The mirror of `sendSms`, and the primitive that makes the platform able to
+ * initiate rather than only react. It returns as soon as Twilio has accepted the
+ * call: the call itself is asynchronous, and everything that happens on it arrives
+ * later at `statusCallbackUrl` or at the TwiML URL.
+ *
+ * **This function does not check whether it is allowed to ring this number.** There
+ * is no consent, suppression or calling-hours check here, and there cannot be — it
+ * is a protocol wrapper with no database access. Every caller must run those checks
+ * itself, at origination, before calling this. See the origination route, which
+ * writes the `calls` row first and checks suppression ahead of dialling.
+ */
+export async function placeCall(input: PlaceCallInput): Promise<PlaceCallResult> {
+  const accountSid = serverEnv.twilioAccountSid;
+  const authToken = serverEnv.twilioAuthToken;
+
+  const form = new URLSearchParams({
+    To: input.to,
+    From: input.from,
+    Url: input.twimlUrl,
+    // Twilio fetches `Url` with POST unless told otherwise. Stated explicitly
+    // because the webhook route verifies a signature over the POST body, and a GET
+    // with no body would validate against nothing.
+    Method: 'POST',
+    Timeout: String(input.timeoutSeconds ?? 25),
+  });
+
+  if (input.statusCallbackUrl) {
+    form.set('StatusCallback', input.statusCallbackUrl);
+    /*
+     * Without this Twilio posts only the terminal event. The intermediate ones are
+     * what make the difference between "rang out unanswered" and "answered, then
+     * hung up" legible after the fact — and `answered` is the only signal that says
+     * a human was ever on the line.
+     */
+    form.set('StatusCallbackEvent', 'initiated ringing answered completed');
+    form.set('StatusCallbackMethod', 'POST');
+  }
+
+  if (input.record) form.set('Record', 'record-from-answer-dual');
+
+  const headers: Record<string, string> = {
+    authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+    'content-type': 'application/x-www-form-urlencoded',
+  };
+  if (input.idempotencyKey) headers['I-Twilio-Idempotency-Token'] = input.idempotencyKey;
+
+  const response = await fetch(`${twilioApiBase()}/Accounts/${accountSid}/Calls.json`, {
+    method: 'POST',
+    headers,
+    body: form,
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  const payload = (await response.json()) as Record<string, unknown>;
+
+  if (!response.ok) {
+    const message = typeof payload['message'] === 'string' ? payload['message'] : response.statusText;
+    const code = payload['code'];
+
+    throw new AppError(
+      // Same split as SMS: 4xx is our mistake — a number we do not own, a
+      // geo-permission block, a malformed callee — and retrying it will fail
+      // identically. 5xx is Twilio's and should be retried.
+      response.status >= 500 ? 'provider_error' : 'unprocessable',
+      response.status >= 500 ? 502 : 422,
+      `Twilio call failed (${code ?? response.status}): ${message}`,
+      { details: { twilioCode: code }, publicMessage: 'The call could not be placed.' },
+    );
+  }
+
+  return {
+    sid: String(payload['sid']),
+    status: String(payload['status']),
     priceAmount: payload['price'] === null ? null : Math.abs(toNumber(payload['price']) ?? 0),
     priceCurrency: typeof payload['price_unit'] === 'string' ? payload['price_unit'] : null,
   };
@@ -138,6 +268,11 @@ export function buildMissedCallTwiml(options: {
     );
   } else {
     // No forwarding configured: treat every call as missed and go straight to SMS.
+    //
+    // Twilio's `<Redirect>` carries no `DialCallStatus`, and the parent call is still
+    // live, so the action callback sees `CallStatus=in-progress` and cannot tell this
+    // apart from an answered call. A caller that means "missed" must therefore say so
+    // explicitly with `markMissedRedirect`, below.
     parts.push(`  <Redirect method="POST">${escapeXml(options.actionUrl)}</Redirect>`);
   }
 
@@ -145,10 +280,92 @@ export function buildMissedCallTwiml(options: {
   return parts.join('\n');
 }
 
+/**
+ * Query parameter marking the action URL of a `<Redirect>` as "this call is missed".
+ *
+ * A `<Dial action=…>` callback reports the outcome of the forwarding leg in
+ * `DialCallStatus`, which is unambiguous. A `<Redirect>` has no leg to report — the
+ * parent call is still up, so `CallStatus` reads `in-progress` and `isMissed` comes
+ * out false. Without an explicit marker the follow-up SMS never fires on a number
+ * with nowhere to forward to, which is precisely how Parkfords is configured.
+ */
+export const MISSED_REDIRECT_PARAM = 'atwood_missed';
+
+/** Add the missed marker to an action URL. Idempotent. */
+export function markMissedRedirect(url: string): string {
+  const marked = new URL(url);
+  marked.searchParams.set(MISSED_REDIRECT_PARAM, '1');
+  return marked.toString();
+}
+
+/** True when an action URL carries the missed marker. */
+export function isMissedRedirect(url: string): boolean {
+  try {
+    return new URL(url).searchParams.get(MISSED_REDIRECT_PARAM) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** Empty TwiML. Ends the call politely once the follow-up SMS is queued. */
 export function buildHangupTwiml(message?: string): string {
   const parts = ['<?xml version="1.0" encoding="UTF-8"?>', '<Response>'];
   if (message) parts.push(`  <Say voice="Polly.Amy">${escapeXml(message)}</Say>`);
+  parts.push('  <Hangup/>', '</Response>');
+  return parts.join('\n');
+}
+
+/**
+ * TwiML that asks a question and collects keypad digits.
+ *
+ * This is the whole of Phase B, and its virtue is what it cannot do: there is no
+ * speech recognition and no model, so a caller who says "sorry, who is this?" or
+ * answers a different question entirely cannot derail it. The call either gets a
+ * digit or it gets nothing, and both are outcomes we know how to record.
+ *
+ * Three details that are load-bearing:
+ *
+ *  * **`actionOnEmptyResult="true"`.** Without it, a caller who says nothing leaves
+ *    the `<Gather>` with no `action` callback at all — the call simply ends and the
+ *    outcome is never written down. With it, the action URL fires with no `Digits`
+ *    parameter, so "no answer" becomes a recorded result rather than silence. This
+ *    is the single most important attribute in this function: an answering machine
+ *    is a perfectly ordinary outcome of an appointment call, and the system has to
+ *    see it.
+ *  * **`numDigits="1"`.** One keypress ends the gather. A longer window collects
+ *    background noise and menu digits pressed at a different system.
+ *  * **The fallback `<Say>` is a sibling of `<Gather>`, not a child.** TwiML runs
+ *    verbs in order, so it plays only when the gather timed out without input. It
+ *    is what makes an unanswered call leave a message instead of dead air.
+ *
+ * `bargeIn` is left at its default: a caller who presses 1 while the prompt is
+ * still being read is understood, not ignored.
+ */
+export function buildGatherTwiml(options: {
+  prompt: string;
+  actionUrl: string;
+  numDigits?: number;
+  /** Seconds of silence to wait after the prompt ends. */
+  timeoutSeconds?: number;
+  /** Said when nothing was pressed, before the call hangs up. */
+  fallbackMessage?: string;
+}): string {
+  const numDigits = options.numDigits ?? 1;
+  const timeout = options.timeoutSeconds ?? 6;
+
+  const parts = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Response>',
+    `  <Gather input="dtmf" numDigits="${numDigits}" timeout="${timeout}"` +
+      ` action="${escapeXml(options.actionUrl)}" method="POST" actionOnEmptyResult="true">`,
+    `    <Say voice="Polly.Amy">${escapeXml(options.prompt)}</Say>`,
+    '  </Gather>',
+  ];
+
+  if (options.fallbackMessage) {
+    parts.push(`  <Say voice="Polly.Amy">${escapeXml(options.fallbackMessage)}</Say>`);
+  }
+
   parts.push('  <Hangup/>', '</Response>');
   return parts.join('\n');
 }
@@ -486,6 +703,12 @@ export interface InboundCallPayload {
   callStatus: string;
   /** Populated on the `action` callback of a <Dial>. */
   dialCallStatus: string | null;
+  /**
+   * Populated on the `action` callback of a <Gather>. Null means either that this
+   * was not a gather callback, or that it was and nothing was pressed — the two are
+   * told apart by which URL was called, not by this value.
+   */
+  digits: string | null;
   /** True when the call went unanswered and the follow-up SMS should fire. */
   isMissed: boolean;
   duration: number | null;
@@ -517,6 +740,9 @@ export function parseInboundCall(params: Record<string, string>): InboundCallPay
     to: to.replace('whatsapp:', ''),
     callStatus,
     dialCallStatus,
+    // Twilio posts the pressed key as a string. Trimmed and empty-collapsed so a
+    // gather that timed out reads as null rather than as an empty string.
+    digits: typeof params['Digits'] === 'string' && params['Digits'].trim() !== '' ? params['Digits'].trim() : null,
     isMissed,
     duration: toNumber(params['DialCallDuration'] ?? params['CallDuration']),
   };

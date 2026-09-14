@@ -14,6 +14,7 @@ import {
   withInternalAuth,
   type InternalAuthContext,
 } from '@/lib/internal-auth';
+import { publicOrigin } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/internal/v1/calls/missed
@@ -142,13 +143,13 @@ export const POST = withInternalAuth(async (request: Request, auth: InternalAuth
 /**
  * Absolute URL for the delivery-receipt webhook.
  *
- * Derived from the incoming request so it is correct in preview deployments as well
- * as production, where the host differs per branch.
+ * Built from the *public* origin, not `request.url`: behind the tunnel the latter is
+ * `https://localhost:3001`, which Twilio refuses outright — error 21609, taking the
+ * whole message send down with it.
  */
 function statusCallbackUrl(request: Request): string | undefined {
   try {
-    const url = new URL(request.url);
-    return `${url.origin}/api/webhooks/twilio/status`;
+    return `${publicOrigin(request)}/api/webhooks/twilio/status`;
   } catch {
     return undefined;
   }

@@ -2,7 +2,6 @@ import { redirect } from 'next/navigation';
 
 import { explainAuthError, publicEnv } from '@atwood/core';
 
-import { Card } from '@/components/ui';
 import { createClient, getCurrentUser } from '@/lib/supabase/server';
 
 /**
@@ -55,15 +54,25 @@ export default async function LoginPage({
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-16">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold">Atwood Systems</h1>
-        <p className="mt-1.5 text-[14px]" style={{ color: 'var(--text-secondary)' }}>
+    <main className="relative mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-16">
+      {/* Ambient brand glow behind the card. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+        style={{
+          background:
+            'radial-gradient(50% 45% at 50% 35%, color-mix(in srgb, var(--brand-accent) 12%, transparent), transparent 70%)',
+        }}
+      />
+
+      <div className="relative mb-8">
+        <h1 className="text-gradient text-3xl font-bold tracking-tight">Atwood Systems</h1>
+        <p className="mt-2 text-[14px]" style={{ color: 'var(--text-secondary)' }}>
           Sign in to your receptionist dashboard.
         </p>
       </div>
 
-      <Card>
+      <div className="glass hairline relative rounded-2xl p-8">
         {sent ? (
           <div className="text-[14px]">
             <p className="font-medium">Check your email.</p>
@@ -72,17 +81,11 @@ export default async function LoginPage({
             </p>
           </div>
         ) : (
-          <form action={signIn} className="space-y-4">
+          <form action={signIn} className="space-y-5">
             <input type="hidden" name="next" value={next ?? '/app'} />
 
-            <div>
-              <label
-                htmlFor="email"
-                className="mb-1.5 block text-[13px] font-medium"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                Email address
-              </label>
+            <div className="field">
+              <label htmlFor="email">Email address</label>
               <input
                 id="email"
                 name="email"
@@ -90,12 +93,7 @@ export default async function LoginPage({
                 required
                 autoComplete="email"
                 autoFocus
-                className="w-full rounded-lg border px-3 py-2.5 text-[14px]"
-                style={{
-                  background: 'var(--surface-2)',
-                  borderColor: 'var(--border-strong)',
-                  color: 'var(--text-primary)',
-                }}
+                placeholder="you@example.com"
               />
             </div>
 
@@ -105,18 +103,14 @@ export default async function LoginPage({
               </p>
             ) : null}
 
-            <button
-              type="submit"
-              className="w-full rounded-lg px-4 py-2.5 text-[14px] font-semibold"
-              style={{ background: 'var(--brand-accent)', color: '#ffffff' }}
-            >
+            <button type="submit" className="btn-primary w-full">
               Email me a sign-in link
             </button>
           </form>
         )}
-      </Card>
+      </div>
 
-      <p className="mt-6 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+      <p className="relative mt-6 text-[12px]" style={{ color: 'var(--text-muted)' }}>
         No password to remember. We&rsquo;ll email you a link each time.
       </p>
     </main>

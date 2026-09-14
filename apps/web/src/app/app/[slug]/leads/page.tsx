@@ -71,7 +71,7 @@ export default async function LeadsPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Leads</h1>
+        <h1 className="text-gradient text-2xl font-semibold tracking-tight">Leads</h1>
         <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
           Extracted from conversations. Highest score first — most complete and most
           urgent at the top.
@@ -85,22 +85,12 @@ export default async function LeadsPage({
             name="q"
             defaultValue={q ?? ''}
             placeholder="Search name, number, postcode or summary"
-            className="min-w-[220px] flex-1 rounded-lg border px-3 py-2 text-[13px]"
-            style={{
-              background: 'var(--surface-2)',
-              borderColor: 'var(--border-strong)',
-              color: 'var(--text-primary)',
-            }}
+            className="control min-w-[220px] flex-1 px-3 py-2 text-[13px]"
           />
           <select
             name="status"
             defaultValue={status ?? ''}
-            className="rounded-lg border px-3 py-2 text-[13px]"
-            style={{
-              background: 'var(--surface-2)',
-              borderColor: 'var(--border-strong)',
-              color: 'var(--text-primary)',
-            }}
+            className="control px-3 py-2 text-[13px]"
           >
             <option value="">Any status</option>
             {['new', 'qualifying', 'qualified', 'booked', 'nurture', 'unqualified', 'won', 'lost'].map(
@@ -114,21 +104,12 @@ export default async function LeadsPage({
           <select
             name="sort"
             defaultValue={sort ?? 'score'}
-            className="rounded-lg border px-3 py-2 text-[13px]"
-            style={{
-              background: 'var(--surface-2)',
-              borderColor: 'var(--border-strong)',
-              color: 'var(--text-primary)',
-            }}
+            className="control px-3 py-2 text-[13px]"
           >
             <option value="score">Best first</option>
             <option value="recent">Newest first</option>
           </select>
-          <button
-            type="submit"
-            className="rounded-lg px-3.5 py-2 text-[13px] font-semibold"
-            style={{ background: 'var(--brand-accent)', color: '#ffffff' }}
-          >
+          <button type="submit" className="btn-primary btn-sm">
             Apply
           </button>
         </form>

@@ -45,7 +45,7 @@ export default async function AppointmentsPage({ params }: { params: Promise<{ s
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Appointments</h1>
+        <h1 className="text-gradient text-2xl font-semibold tracking-tight">Appointments</h1>
         <p className="mt-1 text-[13px]" style={{ color: 'var(--text-secondary)' }}>
           Booked by the assistant or by your team. Times shown in each booking&rsquo;s own timezone.
         </p>

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { TenantNav } from '@/components/tenant-nav';
 import { requireTenant } from '@/lib/tenant';
 
 /**
@@ -13,6 +14,9 @@ import { requireTenant } from '@/lib/tenant';
  * The colours reach chrome only. Data marks use the fixed validated `--series-*`
  * palette, which is not overridden here — see the note in globals.css for why a
  * customer-chosen colour must never become an encoding.
+ *
+ * The shell is the dark-canvas glassmorphism frame: a brand-tinted ambient glow at
+ * the top, a frosted sticky header, and the content column beneath.
  */
 export default async function TenantLayout({
   children,
@@ -36,6 +40,7 @@ export default async function TenantLayout({
 
   return (
     <div
+      className="relative"
       style={
         {
           '--brand-primary': tenant.theme.brandPrimary,
@@ -46,9 +51,19 @@ export default async function TenantLayout({
         } as React.CSSProperties
       }
     >
-      <header className="border-b" style={{ borderColor: 'var(--border-subtle)', background: 'var(--surface-1)' }}>
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-3">
-          <a href={`/app/${slug}`} className="flex items-center gap-2.5 min-w-0">
+      {/* Ambient brand glow bleeding down from the top of the canvas. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-80"
+        style={{
+          background:
+            'radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--brand-accent) 10%, transparent), transparent 70%)',
+        }}
+      />
+
+      <header className="glass hairline sticky top-0 z-40">
+        <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
+          <a href={`/app/${slug}`} className="flex min-w-0 items-center gap-2.5">
             {tenant.theme.logoUrl ? (
               // Plain <img>: the URL is tenant-supplied and arbitrary, so it cannot
               // be pre-declared to next/image's remote allowlist.
@@ -60,40 +75,34 @@ export default async function TenantLayout({
               />
             ) : (
               <span
-                className="grid size-7 shrink-0 place-items-center rounded-md text-[12px] font-bold"
-                style={{ background: 'var(--brand-primary)', color: 'var(--brand-foreground)' }}
+                className="grid size-8 shrink-0 place-items-center rounded-xl text-[13px] font-bold"
+                style={{
+                  background: 'color-mix(in srgb, var(--brand-accent) 12%, transparent)',
+                  border: '1px solid var(--edge)',
+                }}
               >
-                {(tenant.theme.tradingName ?? tenant.name).slice(0, 1).toUpperCase()}
+                <span className="text-gradient">
+                  {(tenant.theme.tradingName ?? tenant.name).slice(0, 1).toUpperCase()}
+                </span>
               </span>
             )}
-            <span className="truncate text-[14px] font-semibold">
+            <span className="text-gradient truncate text-[15px] font-semibold">
               {tenant.theme.tradingName ?? tenant.name}
             </span>
           </a>
 
-          <nav className="ml-auto flex items-center gap-0.5 overflow-x-auto">
-            {nav.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="rounded-md px-2.5 py-1.5 text-[13px] font-medium whitespace-nowrap hover:brightness-95"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
+          <TenantNav items={nav} />
 
           <span
-            className="hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline"
-            style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}
+            className="chip hidden shrink-0 text-[11px] sm:inline-flex"
+            style={{ color: 'var(--text-muted)' }}
           >
             {tenant.role}
           </span>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className="relative mx-auto max-w-6xl px-6 py-8">{children}</main>
     </div>
   );
 }
