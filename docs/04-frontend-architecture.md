@@ -20,7 +20,7 @@ Next.js App Router, TypeScript, Tailwind v4. Server components by default.
 ```
 
 Slug rather than business id in the URL, because an owner reading
-`/app/parkfords/leads` knows where they are. `requireTenant(slug)` resolves it on
+`/app/volta/leads` knows where they are. `requireTenant(slug)` resolves it on
 every page.
 
 ## Data fetching

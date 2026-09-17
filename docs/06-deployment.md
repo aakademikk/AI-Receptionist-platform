@@ -85,8 +85,8 @@ pnpm n8n:up       # http://localhost:5678
 ```
 
 Sign in at `/login` as `dev@atwood.systems`. Local mail is caught rather than
-delivered — read the link at `http://localhost:54324`. The seed creates Parkfords
-Property Management with two conversations, one of them escalated, so the dashboard
+delivered — read the link at `http://localhost:54324`. The seed creates VOLTA
+Electrical Contractors with two conversations, one of them escalated, so the dashboard
 has something to show.
 
 ### Verifying the schema without Supabase

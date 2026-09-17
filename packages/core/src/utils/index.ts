@@ -28,6 +28,13 @@ export {
 } from './sms.ts';
 
 export {
+  cleanForSpeech,
+  limitForSpeech,
+  MAX_SPOKEN_CHARS,
+  type SpeechTrimResult,
+} from './speech.ts';
+
+export {
   AppError,
   badRequest,
   unauthorized,

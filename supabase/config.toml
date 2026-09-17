@@ -26,8 +26,27 @@ port = 54324
 
 [auth]
 enabled = true
-site_url = "http://localhost:3000"
-additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+# Magic-link redirects must point at the public tunnel origin, not localhost, so a
+# link opened from a phone lands on the real host. localhost stays in the allow-list
+# for desktop development.
+#
+# The `/**` entries matter: the login page sends `.../auth/callback?next=/app`, and a
+# bare entry is matched as a literal, so the query string would fail validation and
+# GoTrue would silently fall back to site_url — landing the user on `/` with no code
+# to exchange. The wildcard is the documented form for a custom domain.
+#
+# Migrated to atwoodsystems.co.uk on 2026-09-17, and the aaa123.uk entries came out the
+# same day once the new host was confirmed. The tunnel ingress for the old name went with
+# them -- removing one and not the other is the failure mode worth naming: an allow-listed
+# hostname that no longer resolves still validates, so a stale magic link would be accepted
+# and then land nowhere, which reads as a broken sign-in rather than a retired host.
+site_url = "https://receptionist.atwoodsystems.co.uk"
+additional_redirect_urls = [
+  "https://receptionist.atwoodsystems.co.uk/auth/callback",
+  "https://receptionist.atwoodsystems.co.uk/**",
+  "http://localhost:3000/auth/callback",
+  "http://localhost:3000/**",
+]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
@@ -37,6 +56,44 @@ enable_signup = true
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
+
+# Send auth mail through Resend rather than dropping it in the local catcher.
+#
+# Mailpit (see [local_smtp]) catches mail; it does not send it. That is right for
+# developing against dev@atwood.systems and wrong the moment a magic link has to
+# reach somebody else's phone — a prospect signing in to a demo tenant gets an
+# account that works and a link that never arrives.
+#
+# Same Resend account and same verified sender as the owner-alert leg, so there is
+# one domain to keep verified rather than two.
+#
+# ⚠ Both values are env() and BOTH MUST BE EXPORTED when `supabase start` runs.
+# Measured on CLI 2.110: env() reads the process environment ONLY — a .env file in
+# the working directory is NOT loaded — and an unresolved env() in a *string* field
+# is not an error, it silently becomes "". So a bare `supabase start` hands GoTrue
+# an empty password and every auth email fails quietly. Start the stack with
+# scripts/supabase-start.sh, which exports them and refuses to start without them.
+[auth.email.smtp]
+host = "smtp.resend.com"
+# 465 is implicit TLS, so the connection is encrypted before credentials are sent
+# rather than relying on a STARTTLS upgrade that a proxy could strip.
+port = 465
+# Resend's SMTP username is the literal string "resend" for every account; the API
+# key is the password.
+user = "resend"
+pass = "env(RESEND_API_KEY)"
+admin_email = "env(NOTIFICATION_FROM_EMAIL)"
+sender_name = "Atwood Systems"
+
+# Custom email templates. Both point at /auth/confirm (the `verifyOtp` route)
+# rather than /auth/callback, so a link can be requested on one device and opened
+# on another. Registered here is not enough on its own: the template only takes
+# effect after `supabase stop && supabase start` (or an auth-container restart).
+[auth.email.template.magic_link]
+content_path = "./supabase/templates/magic-link.html"
+
+[auth.email.template.confirmation]
+content_path = "./supabase/templates/confirmation.html"
 
 [auth.sms]
 enable_signup = false

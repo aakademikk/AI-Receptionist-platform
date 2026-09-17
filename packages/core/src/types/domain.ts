@@ -108,6 +108,7 @@ export interface BusinessProfileContext {
   tone_of_voice: string;
   ai_assistant_name: string;
   greeting_template: string | null;
+  voice_greeting_template: string | null;
   signature: string | null;
   custom_instructions: string | null;
   social_links: Record<string, string>;

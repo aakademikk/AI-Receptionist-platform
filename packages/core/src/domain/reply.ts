@@ -7,14 +7,15 @@ import { providerRefused } from '../utils/errors.ts';
 import { logger } from '../utils/logger.ts';
 import { redactObject } from '../utils/redact.ts';
 import { cleanModelReply, measureSms, trimToSegments } from '../utils/sms.ts';
+import { limitForSpeech, MAX_SPOKEN_CHARS } from '../utils/speech.ts';
 
 /**
  * AI Response engine.
  *
- * Builds the prompt, calls the tenant's chosen model, sanitises the output for
- * SMS, and records the call in `ai_logs`. It does not send anything — sending is
- * the messaging workflow's job — so this function stays pure enough to test and
- * to re-run against a finished conversation.
+ * Builds the prompt, calls the tenant's chosen model, sanitises the output for the
+ * channel it is going out on, and records the call in `ai_logs`. It does not send
+ * anything — sending is the messaging workflow's job — so this function stays pure
+ * enough to test and to re-run against a finished conversation.
  */
 
 export interface GenerateReplyInput {
@@ -161,12 +162,27 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
     });
   }
 
-  const { body, wasTrimmed, metrics } = trimToSegments(cleaned, settings.max_sms_segments);
+  /*
+   * Trim to suit the channel, not to suit SMS on both.
+   *
+   * `memory.channel` is already here, so this costs no new input and cannot be forgotten
+   * by a caller: a reply composed for a phone call is shaped for a phone call. The two
+   * limits measure different things — septets against a carrier's segment boundary, or
+   * characters against how long somebody will listen — and using the SMS one on a call
+   * would cut a caller off at a sentence the model never ended.
+   */
+  const spoken = memory.channel === 'voice';
+
+  const { body, wasTrimmed } = spoken
+    ? limitForSpeech(cleaned, MAX_SPOKEN_CHARS)
+    : trimToSegments(cleaned, settings.max_sms_segments);
 
   if (wasTrimmed) {
-    log.info('Trimmed reply to fit the SMS segment budget', {
-      maxSegments: settings.max_sms_segments,
-      originalSegments: measureSms(cleaned).segments,
+    log.info('Trimmed the reply to fit the channel', {
+      channel: memory.channel,
+      ...(spoken
+        ? { maxChars: MAX_SPOKEN_CHARS, originalLength: cleaned.length }
+        : { maxSegments: settings.max_sms_segments, originalSegments: measureSms(cleaned).segments }),
     });
   }
 
@@ -177,7 +193,9 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
     provider: result.provider,
     latencyMs: result.latencyMs,
     costUsd: result.costUsd,
-    segments: metrics.segments,
+    // Still a true statement about the text on both channels — it is simply no longer
+    // the measurement that governed the trim once the reply is going to be spoken.
+    segments: measureSms(body).segments,
     wasTrimmed,
     refused: null,
   };

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { explainAuthError, publicEnv } from '@atwood/core';
 
+import { publicOrigin, sanitiseNext } from '@/lib/auth-redirect';
 import { createClient } from '@/lib/supabase/server';
 
 /**
@@ -16,11 +17,12 @@ import { createClient } from '@/lib/supabase/server';
  */
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  const base = publicOrigin(request);
   const code = url.searchParams.get('code');
   const next = sanitiseNext(url.searchParams.get('next'));
 
   if (!code) {
-    return NextResponse.redirect(new URL('/login?error=Missing+sign-in+code', url.origin));
+    return NextResponse.redirect(new URL('/login?error=Missing+sign-in+code', base));
   }
 
   const supabase = await createClient();
@@ -28,22 +30,8 @@ export async function GET(request: Request): Promise<Response> {
 
   if (error) {
     const message = explainAuthError(error.message, publicEnv.supabaseUrl);
-    return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(message)}`, url.origin),
-    );
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, base));
   }
 
-  return NextResponse.redirect(new URL(next, url.origin));
-}
-
-/**
- * Only same-origin paths. Rejects `//evil.example`, `https://evil.example`, and
- * anything else that would leave our origin.
- */
-function sanitiseNext(value: string | null): string {
-  if (!value) return '/app';
-  if (!value.startsWith('/')) return '/app';
-  // `//host` is protocol-relative and would leave the origin.
-  if (value.startsWith('//')) return '/app';
-  return value;
+  return NextResponse.redirect(new URL(next, base));
 }

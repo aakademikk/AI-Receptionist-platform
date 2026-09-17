@@ -1,6 +1,7 @@
 export {
   buildReceptionistSystemPrompt,
   renderMissedCallSms,
+  renderVoiceGreeting,
   type ReceptionistPromptInput,
 } from './receptionist.ts';
 

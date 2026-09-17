@@ -78,7 +78,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ slug:
             <tbody>
               {queue.map((row) => (
                 <tr key={row.conversation_id}>
-                  <Td>
+                  <Td label="">
                     <a
                       href={`/app/${slug}/conversations/${row.conversation_id}`}
                       className="font-medium hover:underline"
@@ -86,18 +86,18 @@ export default async function OverviewPage({ params }: { params: Promise<{ slug:
                       {row.customer_name ?? formatPhoneForDisplay(row.customer_phone) ?? 'Unknown'}
                     </a>
                   </Td>
-                  <Td>
+                  <Td label="Why">
                     <Badge tone={row.urgency === 'emergency' ? 'critical' : 'warning'}>
                       {(row.handover_reason_code ?? 'manual').replaceAll('_', ' ')}
                     </Badge>
                   </Td>
-                  <Td align="right">
+                  <Td label="Waiting" align="right">
                     <span style={{ color: row.sla_breached ? 'var(--status-critical)' : undefined }}>
                       {row.waiting_minutes}m{row.sla_breached ? ' · overdue' : ''}
                     </span>
                   </Td>
-                  <Td muted>
-                    <span className="line-clamp-2">{row.summary ?? '—'}</span>
+                  <Td label="Summary" muted prose>
+                    <span className="line-clamp-3 sm:line-clamp-2">{row.summary ?? '—'}</span>
                   </Td>
                 </tr>
               ))}

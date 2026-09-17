@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto';
 import { describe, it } from 'node:test';
 
 import {
+  buildConversationRelayTwiml,
   buildGatherTwiml,
   buildMissedCallTwiml,
   diagnoseTwilioSignature,
@@ -76,10 +77,10 @@ describe('reconstructTwilioUrl', () => {
   it('preserves the query string', () => {
     // Twilio signs the URL as configured, query included.
     const result = reconstructTwilioUrl({
-      requestUrl: 'http://localhost:3000/api/webhooks/twilio/sms?tenant=parkfords',
+      requestUrl: 'http://localhost:3000/api/webhooks/twilio/sms?tenant=volta',
       baseUrlOverride: 'https://tunnel.example.com',
     });
-    assert.equal(result, 'https://tunnel.example.com/api/webhooks/twilio/sms?tenant=parkfords');
+    assert.equal(result, 'https://tunnel.example.com/api/webhooks/twilio/sms?tenant=volta');
   });
 
   it('leaves the URL alone when nothing overrides it', () => {
@@ -775,5 +776,85 @@ describe('missed-redirect marker', () => {
     const dial = buildMissedCallTwiml({ forwardTo: '+447700900123', actionUrl: ACTION });
     assert.match(dial, /<Dial timeout="20" action="\S+missed" method="POST">\+447700900123<\/Dial>/);
     assert.doesNotMatch(dial, /<Redirect/);
+  });
+});
+
+const RELAY_URL = 'wss://receptionist.aaa123.uk/relay';
+
+/**
+ * The Phase C entry point. Small, but every attribute here is a decision, and the two
+ * that would fail silently are the scheme check and the greeting's placement.
+ */
+describe('buildConversationRelayTwiml', () => {
+  it('connects under <Connect> rather than as a bare verb', () => {
+    const xml = buildConversationRelayTwiml({ url: RELAY_URL });
+    assert.match(xml, /<Connect>\s*<ConversationRelay url="wss:\/\/receptionist\.aaa123\.uk\/relay" \/>\s*<\/Connect>/);
+  });
+
+  it('rejects a non-secure url at build time rather than letting Twilio fail the call', () => {
+    // Twilio requires wss:// and fails the call on anything else, with the reason buried in
+    // the call debugger. Throwing here turns that into a named config error.
+    assert.throws(
+      () => buildConversationRelayTwiml({ url: 'ws://receptionist.aaa123.uk/relay' }),
+      /must start with wss:\/\//,
+    );
+    assert.throws(
+      () => buildConversationRelayTwiml({ url: 'https://receptionist.aaa123.uk/relay' }),
+      /must start with wss:\/\//,
+    );
+  });
+
+  it('omits every attribute that was not asked for, rather than pinning defaults', () => {
+    const xml = buildConversationRelayTwiml({ url: RELAY_URL });
+    for (const attribute of ['welcomeGreeting', 'language', 'ttsLanguage', 'ttsProvider', 'voice', 'speechModel']) {
+      assert.doesNotMatch(xml, new RegExp(attribute), `${attribute} should not be pinned`);
+    }
+  });
+
+  it('carries the tenant as a <Parameter>, not on the query string', () => {
+    // The TwiML is signature-protected and the socket URL is ours, so a caller cannot
+    // choose their own tenant by editing anything they control.
+    const xml = buildConversationRelayTwiml({
+      url: RELAY_URL,
+      parameters: { businessId: 'biz-1', callSid: 'CA123' },
+    });
+    assert.match(xml, /<ConversationRelay [^>]*>\n\s+<Parameter name="businessId" value="biz-1" \/>/);
+    assert.match(xml, /<Parameter name="callSid" value="CA123" \/>/);
+    assert.match(xml, /<\/ConversationRelay>\s*<\/Connect>/);
+  });
+
+  it('pins the speech language separately from the recognition language', () => {
+    // `language` supplies the TTS language by fallback when `ttsLanguage` is absent, so a
+    // voice and an accent can both be inherited from defaults that are invisible in the
+    // TwiML. Sending both makes the call's accent a decision rather than a side effect.
+    const xml = buildConversationRelayTwiml({
+      url: RELAY_URL,
+      language: 'en-GB',
+      ttsLanguage: 'en-GB',
+    });
+    assert.match(xml, /\slanguage="en-GB"/);
+    assert.match(xml, /\sttsLanguage="en-GB"/);
+  });
+
+  it('escapes values that would otherwise break the XML', () => {
+    const xml = buildConversationRelayTwiml({
+      url: RELAY_URL,
+      welcomeGreeting: 'Hello & welcome to "Atwood" <test>',
+    });
+    assert.match(xml, /Hello &amp; welcome to &quot;Atwood&quot; &lt;test&gt;/);
+    assert.doesNotMatch(xml, /<test>/);
+  });
+
+  it('leaves barge-in on by default, because muting it is what makes an assistant feel broken', () => {
+    const xml = buildConversationRelayTwiml({ url: RELAY_URL });
+    assert.doesNotMatch(xml, /interruptible/);
+  });
+
+  it('only turns on DTMF when asked, since nothing handles it otherwise', () => {
+    assert.doesNotMatch(buildConversationRelayTwiml({ url: RELAY_URL }), /dtmfDetection/);
+    assert.match(
+      buildConversationRelayTwiml({ url: RELAY_URL, dtmfDetection: true }),
+      /dtmfDetection="true"/,
+    );
   });
 });

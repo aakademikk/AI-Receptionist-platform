@@ -16,8 +16,8 @@ deployment — it is rows.
 Missed call
   └─ Twilio → /api/webhooks/twilio/voice/missed   (signature verified, TwiML in <15s)
        └─ route number → tenant → open conversation → record call
-            └─ send branded SMS: "Hi, thanks for contacting Parkfords Property
-               Management. We're sorry we missed your call. How can we help today?"
+            └─ send branded SMS: "Hi, thanks for contacting VOLTA. We're sorry we
+               missed your call. How can we help today?"
                  └─ notify the owner
 
 Customer replies
@@ -90,10 +90,11 @@ atwood-systems/
 │           └── env.ts              The only place process.env is read
 │
 ├── supabase/
-│   ├── migrations/                 0001–0010: enums → tenancy → profile →
+│   ├── migrations/                 0001–0013: enums → tenancy → profile →
 │   │                               telephony → leads → notifications → audit →
-│   │                               RLS → RPCs → views
-│   ├── seed.sql                    Parkfords demo tenant
+│   │                               RLS → RPCs → views → outbound voice →
+│   │                               answer mode → voice greeting
+│   ├── seed.sql                    VOLTA demo tenant
 │   ├── tests/validate_local.sh     Applies everything to a throwaway cluster
 │   ├── tests/functional.sql        Isolation, idempotency, privilege, GDPR
 │   └── config.toml
@@ -164,8 +165,8 @@ the API — Studio (54323), the Storage (S3) URL ending in `/storage/v1/s3`, and
 names the one to use, but they are easy to grab by accident.
 
 Sign in at `/login` as `dev@atwood.systems`. The magic link is never really sent
-locally — read it at `http://localhost:54324`. The seed ships Parkfords Property
-Management with two conversations — one of them escalated — so the dashboard has
+locally — read it at `http://localhost:54324`. The seed ships VOLTA Electrical
+Contractors with two conversations — one of them escalated — so the dashboard has
 something to show.
 
 Full walkthrough, Twilio and n8n wiring, and production deployment:

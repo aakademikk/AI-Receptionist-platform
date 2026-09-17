@@ -13,12 +13,12 @@ begin;
 -- Fixtures: two tenants, so isolation failures are visible rather than theoretical.
 -- -----------------------------------------------------------------------------
 insert into auth.users (id, email) values
-  ('11111111-1111-1111-1111-111111111111', 'owner@parkfords.test'),
+  ('11111111-1111-1111-1111-111111111111', 'owner@acme.test'),
   ('22222222-2222-2222-2222-222222222222', 'owner@rival.test'),
-  ('33333333-3333-3333-3333-333333333333', 'viewer@parkfords.test');
+  ('33333333-3333-3333-3333-333333333333', 'viewer@acme.test');
 
 insert into public.businesses (id, slug, name, status) values
-  ('aaaaaaaa-0000-0000-0000-000000000001', 'parkfords', 'Parkfords Property Management', 'active'),
+  ('aaaaaaaa-0000-0000-0000-000000000001', 'acme', 'Acme Block Management', 'active'),
   ('bbbbbbbb-0000-0000-0000-000000000002', 'rival-co', 'Rival Co', 'active');
 
 insert into public.memberships (business_id, user_id, role) values
@@ -35,7 +35,7 @@ insert into public.services (business_id, name, price_text, is_bookable) values
   ('aaaaaaaa-0000-0000-0000-000000000001', 'Property Valuation', 'Free', true);
 
 insert into public.notification_recipients (business_id, channel, destination) values
-  ('aaaaaaaa-0000-0000-0000-000000000001', 'email', 'owner@parkfords.test'),
+  ('aaaaaaaa-0000-0000-0000-000000000001', 'email', 'owner@acme.test'),
   ('aaaaaaaa-0000-0000-0000-000000000001', 'dashboard', 'in-app');
 
 -- Defaults must have been provisioned by trigger.
@@ -106,6 +106,93 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- 1b. Thread reuse is channel-dependent (0014).
+--
+-- A text thread is continuous and is reused however old it is. A phone call is a
+-- session: within `voice_session_minutes` a redial continues it, outside that
+-- window the call opens a fresh conversation with a fresh AI turn budget. Nothing
+-- covered this before, which is how a voice thread three days old carried its
+-- turn count into a live call on 2026-09-16.
+-- -----------------------------------------------------------------------------
+do $$
+declare
+  v_sms1 uuid;
+  v_sms2 uuid;
+  v_voice1 uuid;
+  v_voice2 uuid;
+  v_voice3 uuid;
+  r record;
+begin
+  -- SMS: two resolves in a row must land on one thread.
+  select conversation_id into v_sms1 from public.resolve_inbound(
+    '+441134960001', '+447700900801', 'sms', 'inbound_sms');
+  select conversation_id into v_sms2 from public.resolve_inbound(
+    '+441134960001', '+447700900801', 'sms', 'inbound_sms');
+  if v_sms1 <> v_sms2 then
+    raise exception 'FAIL: SMS opened a second thread for the same customer';
+  end if;
+
+  -- ...and must still be reused when it is ancient. Unbounded reuse is the
+  -- documented SMS behaviour, so age must make no difference at all.
+  update public.conversations set last_message_at = now() - interval '30 days'
+  where id = v_sms1;
+
+  select conversation_id into v_sms2 from public.resolve_inbound(
+    '+441134960001', '+447700900801', 'sms', 'inbound_sms');
+  if v_sms1 <> v_sms2 then
+    raise exception 'FAIL: an old SMS thread was abandoned; SMS reuse must be unbounded';
+  end if;
+
+  -- Voice, inside the window: the same session.
+  select conversation_id into v_voice1 from public.resolve_inbound(
+    '+441134960001', '+447700900802', 'voice', 'inbound_call');
+  update public.conversations set last_message_at = now() - interval '2 minutes'
+  where id = v_voice1;
+
+  select conversation_id into v_voice2 from public.resolve_inbound(
+    '+441134960001', '+447700900802', 'voice', 'inbound_call');
+  if v_voice1 <> v_voice2 then
+    raise exception 'FAIL: a redial 2 minutes later should continue the session';
+  end if;
+
+  -- Voice, outside the window: a new session, and the old one is closed rather
+  -- than left `active` forever.
+  update public.conversations
+  set last_message_at = now() - interval '2 hours', ai_turn_count = 19
+  where id = v_voice1;
+
+  select * into r from public.resolve_inbound(
+    '+441134960001', '+447700900802', 'voice', 'inbound_call');
+  v_voice3 := r.conversation_id;
+
+  if v_voice3 = v_voice1 then
+    raise exception 'FAIL: a call 2 hours later continued the previous session';
+  end if;
+  if not r.is_new_conversation then
+    raise exception 'FAIL: is_new_conversation should be true for a fresh voice session';
+  end if;
+  if (select ai_turn_count from public.conversations where id = v_voice3) <> 0 then
+    raise exception 'FAIL: a new voice session must start with a fresh turn budget';
+  end if;
+  if (select status from public.conversations where id = v_voice1) <> 'resolved' then
+    raise exception 'FAIL: the superseded voice thread should have been closed';
+  end if;
+
+  -- A thread a human owns is never closed by this path: they still owe a callback.
+  update public.conversations
+  set status = 'waiting_for_human', last_message_at = now() - interval '2 hours'
+  where id = v_voice3;
+
+  perform public.resolve_inbound(
+    '+441134960001', '+447700900802', 'voice', 'inbound_call');
+
+  if (select status from public.conversations where id = v_voice3) <> 'waiting_for_human' then
+    raise exception 'FAIL: a thread awaiting a human was closed out from under them';
+  end if;
+end;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- 2. Message append: idempotency, counters, first response time.
 -- -----------------------------------------------------------------------------
 do $$
@@ -122,7 +209,7 @@ begin
   -- Branded outbound SMS (the missed-call follow-up).
   select * into m1 from public.append_message(
     v_conv, 'outbound', 'ai',
-    'Hi, thanks for contacting Parkfords Property Management. Sorry we missed your call. How can we help?',
+    'Hi, thanks for contacting Acme Block Management. Sorry we missed your call. How can we help?',
     'sms', 'twilio', 'SM_out_001', 'sent'
   );
   if not m1.was_created then raise exception 'FAIL: first outbound not created'; end if;

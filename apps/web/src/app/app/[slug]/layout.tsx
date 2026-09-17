@@ -40,29 +40,48 @@ export default async function TenantLayout({
 
   return (
     <div
-      className="relative"
+      className="ambient relative"
       style={
         {
           '--brand-primary': tenant.theme.brandPrimary,
           '--brand-accent': tenant.theme.brandAccent,
           '--brand-foreground': tenant.theme.brandForeground,
           minHeight: '100dvh',
-          background: 'var(--surface-0)',
         } as React.CSSProperties
       }
     >
-      {/* Ambient brand glow bleeding down from the top of the canvas. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-80"
-        style={{
-          background:
-            'radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--brand-accent) 10%, transparent), transparent 70%)',
-        }}
-      />
+      {/*
+        The ambient backdrop is `.ambient` on this element, not a child div. It has to
+        be: the shell's own background paints beneath every child unconditionally,
+        whereas a child layer needs a z-index, and a negative one paints *behind* the
+        parent's background and vanishes. Painting it here removes the whole class of
+        stacking problem, and it inherits `--brand-accent` from the inline style above
+        so the glow still re-tints per tenant.
 
-      <header className="glass hairline sticky top-0 z-40">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
+        The old version of this was a single 10% radial bleeding down from the top.
+        It is gone, and the `.ambient` rule in globals.css carries the reasoning.
+      */}
+
+      {/*
+        One row at every size.
+        Seven sections, a logo and a role chip do not fit across 390px. This was a
+        second row on a phone, holding the sections in a sideways scroller; both are
+        gone — below `md` the sections live behind a menu button, so the header is a
+        logo and one control and the page gets the vertical space back.
+      */}
+      {/*
+        `overflow-visible` is load-bearing, not decoration. `.hairline` sets
+        `overflow: hidden`, and below `md` the sections menu is an absolutely
+        positioned panel hanging off the bottom of this header — so the header
+        clipped the entire dropdown away. It still laid out and reported a correct
+        rect, which is why it looked like a stacking or transparency bug; in truth
+        nothing painted and `elementFromPoint` fell straight through to the page
+        underneath. Utilities outrank the `components` layer `.hairline` lives in, so
+        this wins without touching the shared class. Nothing else moves: the
+        hairline's `::after` is `inset: 0`, so it has never needed clipping.
+      */}
+      <header className="glass hairline sticky top-0 z-40 overflow-visible">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 sm:px-6 md:gap-4 md:py-3">
           <a href={`/app/${slug}`} className="flex min-w-0 items-center gap-2.5">
             {tenant.theme.logoUrl ? (
               // Plain <img>: the URL is tenant-supplied and arbitrary, so it cannot
@@ -93,8 +112,14 @@ export default async function TenantLayout({
 
           <TenantNav items={nav} />
 
+          {/*
+            Hidden on a phone — and it now actually is. This has read
+            `hidden sm:inline-flex` all along, but `.chip { display: inline-flex }`
+            sat outside a cascade layer and beat the `hidden` utility, so it took
+            up a fifth of the header on a 390px screen. See the note in globals.css.
+          */}
           <span
-            className="chip hidden shrink-0 text-[11px] sm:inline-flex"
+            className="chip hidden shrink-0 text-[11px] md:inline-flex"
             style={{ color: 'var(--text-muted)' }}
           >
             {tenant.role}
@@ -102,7 +127,7 @@ export default async function TenantLayout({
         </div>
       </header>
 
-      <main className="relative mx-auto max-w-6xl px-6 py-8">{children}</main>
+      <main className="relative mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
     </div>
   );
 }

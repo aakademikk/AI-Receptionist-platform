@@ -213,10 +213,10 @@ export default async function AnalyticsPage({
                 <tbody>
                   {sources.map((source) => (
                     <tr key={source.source}>
-                      <Td>{source.source.replaceAll('_', ' ')}</Td>
-                      <Td align="right">{source.leads}</Td>
-                      <Td align="right">{source.qualified}</Td>
-                      <Td align="right" muted>
+                      <Td label="">{source.source.replaceAll('_', ' ')}</Td>
+                      <Td label="Leads" align="right">{source.leads}</Td>
+                      <Td label="Qualified" align="right">{source.qualified}</Td>
+                      <Td label="Avg. completeness" align="right" muted>
                         {source.avg_completeness === null
                           ? '—'
                           : `${Math.round(Number(source.avg_completeness) * 100)}%`}
@@ -246,16 +246,16 @@ export default async function AnalyticsPage({
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.day}>
-                    <Td>{new Date(row.day).toLocaleDateString('en-GB')}</Td>
-                    <Td align="right">{row.calls_missed}</Td>
-                    <Td align="right">{row.conversations_started}</Td>
-                    <Td align="right">{row.leads_captured}</Td>
-                    <Td align="right">{row.leads_qualified}</Td>
-                    <Td align="right">{row.handovers}</Td>
-                    <Td align="right" muted>
+                    <Td label="">{new Date(row.day).toLocaleDateString('en-GB')}</Td>
+                    <Td label="Missed" align="right">{row.calls_missed}</Td>
+                    <Td label="Threads" align="right">{row.conversations_started}</Td>
+                    <Td label="Leads" align="right">{row.leads_captured}</Td>
+                    <Td label="Qualified" align="right">{row.leads_qualified}</Td>
+                    <Td label="Handovers" align="right">{row.handovers}</Td>
+                    <Td label="AI %" align="right" muted>
                       {row.ai_handled_pct === null ? '—' : `${Number(row.ai_handled_pct).toFixed(0)}%`}
                     </Td>
-                    <Td align="right" muted>
+                    <Td label="First reply" align="right" muted>
                       {formatSeconds(row.avg_first_response_seconds)}
                     </Td>
                   </tr>

@@ -51,8 +51,9 @@
   --text-secondary: #b8bcc5; /* muted */
   --text-muted: #7c818c; /* faint */
 
-  /* Tenant brand. Defaults are the demo tenant (Parkfords); overridden inline on
-     the tenant shell from business_profiles. */
+  /* Tenant brand — the no-tenant fallback, for surfaces outside a tenant shell
+     (login, marketing). The tenant shell overrides all three inline from
+     business_profiles, via app/[slug]/layout.tsx. */
   --brand-primary: #12324a;
   --brand-accent: #c9873d;
   --brand-foreground: #ffffff;
@@ -79,9 +80,17 @@
   --status-critical: #e66767;
 }
 
-html,
-body {
+/*
+  `html` keeps the canvas colour on its own. `body` deliberately does not set a
+  background here: this rule is unlayered, so it beats anything in the `components`
+  layer outright, and a `background` shorthand would wipe `.ambient`'s image. The
+  canvas still paints from `html`, so there is no white flash before CSS lands.
+*/
+html {
   background: var(--surface-0);
+}
+
+body {
   color: var(--text-primary);
 }
 
@@ -96,6 +105,28 @@ body {
   outline-offset: 2px;
 }
 
+/* ==========================================================================
+   Everything below is a COMPONENT, and it must live in the `components` cascade
+   layer.
+
+   This wrapper is not cosmetic. Tailwind v4 (`@import 'tailwindcss'` above) emits
+   every utility inside the `utilities` cascade layer, and unlayered CSS beats
+   layered CSS outright — not on specificity, not on source order, but because an
+   unlayered rule is simply a higher tier of the cascade. So while these classes
+   sat outside a layer they won against *every* Tailwind utility in the app.
+
+   That is not a theoretical problem. The role chip in the tenant header is written
+   `class="chip hidden sm:inline-flex"` — hidden below 640px — and it rendered on a
+   390px phone anyway, because `.chip { display: inline-flex }` outranked `.hidden`.
+   The sticky header had the same fault: `.hairline { position: relative }` was
+   beating the `sticky` utility next to it. Every responsive override aimed at one
+   of these components was silently doing nothing, which is exactly why the mobile
+   layout resisted the obvious fixes.
+
+   Declared here as one block rather than re-indenting 200 lines, so the diff shows
+   the cascade change and nothing else.
+   ========================================================================== */
+@layer components {
 /* Tabular figures everywhere a number is compared against another number. */
 .tnum {
   font-variant-numeric: tabular-nums;
@@ -112,11 +143,74 @@ body {
   color: transparent;
 }
 
+/*
+  No hand-written `-webkit-backdrop-filter` here. Lightning CSS (via Tailwind's
+  PostCSS plugin) treats the prefixed and unprefixed forms as one property and keeps
+  whichever was written last — so pairing them made it emit ONLY `-webkit-` and
+  silently drop the standard `backdrop-filter`. Chromium reads the standard property,
+  so every `.glass` surface in the app rendered flat and unfrosted: computed
+  `backdropFilter: none` on the header, the cards and the nav menu alike. Adding the
+  prefix back does not fix it, it causes it. Lightning adds whatever prefixes the
+  browser targets need on its own — verified: with a Safari target present it emits
+  both. Leave it unprefixed.
+*/
+/*
+  A LIGHT translucent wash, and the tint is the whole point.
+
+  This was `linear-gradient(rgba(20,20,20,0.72), rgba(10,10,10,0.72))` — 72% opaque
+  near-black — sitting on a `#090909` canvas. That is a delta of about eight RGB
+  units, so the fill did no optical work at all: measured, a screenshot with every
+  `.glass` fill forced transparent was indistinguishable from the real thing. What
+  Colin saw, "a black panel with a light border", was an accurate description of the
+  object, because that is what a 72% black wash over a near-black canvas *is*.
+
+  Glass can only ever lighten or tint. A dark fill over a dark canvas has nowhere to
+  go but darker, so it can never read as frosted no matter how strong the blur.
+
+  `saturate(150%)` is not decoration either: it pulls the colour out of whatever is
+  behind and stops the frost reading as flat grey. And it needs something behind it
+  with contrast to work on — see `--ambient-backdrop`.
+*/
 .glass {
-  background: linear-gradient(180deg, rgba(20, 20, 20, 0.72), rgba(10, 10, 10, 0.72));
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
+  backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/*
+  The backdrop the glass surfaces frost.
+
+  Blurring a flat colour returns that same flat colour, so `backdrop-filter` over a
+  bare canvas is a no-op however strong it is. The app had exactly one decorative
+  layer — a single centred radial at 10-12% brand accent — which blurred to... a
+  single centred radial at 10-12% brand accent. Nothing for the frost to smear.
+
+  Three, deliberately: one centred wash gives no variation, and it is the *variation*
+  that reads as glass. Offset, overlapping, and at meaningful opacity so the panels
+  have real contrast to sit on.
+
+  `fixed` is load-bearing. These have to stay put while content scrolls past, which is
+  what makes the sticky header visibly change tone as it moves — the one place glass
+  should work for free. Without it the gradient stretches down the full document and
+  every panel sees only a flat slice of it.
+
+  The gradients are written out HERE, in the rule, and must not be hoisted into a
+  `--ambient-backdrop` custom property. That was tried and it silently broke the
+  per-tenant tint: a custom property inherits its *already-substituted* value, so a
+  token declared on `:root` bakes in `:root`'s `--brand-accent` and hands the same
+  frozen string to every descendant. Measured on the Volta shell — accent `#0ab3a0`,
+  gradient still painted `#c9873d`, with no error anywhere to say so. Substituting
+  inside the rule instead resolves against each element's own accent, so the shell
+  tints per business and screens outside a tenant fall back to the root amber.
+*/
+.ambient {
+  background-color: var(--surface-0);
+  background-image:
+    radial-gradient(70% 55% at 22% 4%, color-mix(in srgb, var(--brand-accent) 30%, transparent), transparent 70%),
+    radial-gradient(50% 45% at 88% 30%, color-mix(in srgb, var(--brand-accent) 17%, transparent), transparent 72%),
+    radial-gradient(75% 55% at 45% 100%, color-mix(in srgb, var(--brand-accent) 24%, transparent), transparent 75%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
 }
 
 .hairline {
@@ -323,4 +417,190 @@ body {
 .control option {
   background: var(--panel2);
   color: var(--ink);
+}
+
+/* A horizontal scroller with no visible scrollbar.
+   Used by the section nav on phones, where the bar itself is chrome the user does
+   not need — the partially-visible next item is the affordance. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ==========================================================================
+   Tables become cards on a phone.
+
+   A dashboard table is six or seven columns wide and there is no honest way to fit
+   that across 390px. The version before this one set `min-width: 640px` and put the
+   overflow in a horizontal scroller, which sounds like a reasonable compromise and
+   is not: on a real handset the columns past the third simply cannot be seen, there
+   is no visible scrollbar on touch to say they exist, and the text that is visible
+   is cut mid-word.
+
+   So below `sm` every row becomes its own card and every cell becomes a labelled
+   line. The markup is untouched — still one semantic `<table>`, still correct for a
+   screen reader and still pasteable into a spreadsheet — because this is the CSS
+   changing what the same elements look like, not a second copy of the component for
+   small screens that would drift from the first.
+
+   Each cell's column name comes from `data-label`, set by `Td`. A cell that reads
+   fine on its own passes `label=""` and gets no heading.
+   ========================================================================== */
+@media (max-width: 639px) {
+  .table-cards,
+  .table-cards tbody,
+  .table-cards tr,
+  .table-cards td {
+    display: block;
+    width: 100%;
+  }
+
+  /* The headings move into each cell, so the header row has nothing left to do. */
+  .table-cards thead {
+    display: none;
+  }
+
+  .table-cards tr {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.75rem 0;
+  }
+
+  .table-cards tr:last-child {
+    border-bottom: 0;
+  }
+
+  .table-cards td {
+    border-bottom: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.3rem 1rem;
+    text-align: left;
+  }
+
+  .table-cards td[data-label]:not([data-label=''])::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* The value side takes the remaining width and wraps inside it, rather than the
+     label and the value fighting over one line. Right-aligned so the numbers in a
+     column of cards still line up against the same edge, which is the one thing a
+     table gave you that a stack of cards otherwise loses. */
+  .table-cards td .td-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+  }
+
+  /* A cell with no label is the card's title — the lead's name, the day, the
+     service. It has no heading to sit beside, so it takes the full width and reads
+     from the left like a heading rather than hanging off the right edge with
+     nothing opposite it. */
+  .table-cards td[data-label=''] .td-value {
+    text-align: left;
+    font-size: 14px;
+  }
+}
+}
+
+/* ==========================================================================
+   Text inputs must not be under 16px on iOS.
+
+   Safari zooms the whole page in when a field smaller than 16px takes focus, and
+   it does not zoom back out afterwards — which reads as the layout breaking the
+   moment you tap a search box. Phone-width only; above that there is no keyboard
+   to trigger it and the designed 13px sizing stands.
+
+   This needs its own cascade layer, declared after the ones `@import 'tailwindcss'`
+   brings in, so it is ordered last and therefore wins. Inside `components` it would
+   lose to the `text-[13px]` utility on the very inputs it exists to protect — the
+   same layering trap that hid the responsive classes in the first place, one tier
+   down. Element selectors rather than a class, so a new form cannot forget it.
+   ========================================================================== */
+@layer forms-a11y {
+  @media (max-width: 639px) {
+    input:not([type='checkbox']):not([type='radio']),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+}
+
+/* ==========================================================================
+   Phone reading sizes.
+
+   The card layout below `sm` was correct in structure and too small to read: 11px
+   uppercase labels against 13px values, which is a comfortable density on a desktop
+   table viewed at 60cm and hard work on a handset at arm's length. Colin's verdict
+   on the screenshots was "so small the text is hard to read without zooming", and
+   he was right — the overflow audit that passed this layout cannot see type size,
+   only geometry, which is why it kept scoring clean.
+
+   Same cascade-layer reasoning as `forms-a11y` above, and it is load-bearing here
+   too: every one of these values is set by a Tailwind utility (`text-[13px]`,
+   `text-[11px]`) on the element itself, so a rule in `components` would lose. This
+   layer is declared after the ones `@import 'tailwindcss'` brings in, so it wins.
+
+   Phone width only. The desktop table is unchanged.
+   ========================================================================== */
+@layer phone-type {
+  @media (max-width: 639px) {
+    /* The column name standing in for the missing `thead`. */
+    .table-cards td[data-label]:not([data-label=''])::before {
+      font-size: 12px;
+    }
+
+    .table-cards td .td-value {
+      font-size: 15px;
+    }
+
+    /* The card's title line — the lead's name, the day, the service. */
+    .table-cards td[data-label=''] .td-value {
+      font-size: 16px;
+    }
+
+    /* Status and urgency pills read as labels, so they track the label size
+       rather than the value size. */
+    .table-cards .badge {
+      font-size: 12px;
+    }
+
+    /*
+      A cell holding a sentence rather than a value.
+
+      The default card row is label-left / value-right, and right-alignment is
+      deliberate: it keeps numbers on a common edge, which is the one thing a table
+      gives you that a stack of cards otherwise loses. It is wrong for prose. A
+      two-line summary set ragged-left against the right edge is measurably harder
+      to read and looks like a mistake, so a cell marked `prose` puts its label on
+      its own line and lets the text run the full width, left-aligned, like a
+      paragraph.
+    */
+    .table-cards td[data-prose='true'] {
+      display: block;
+      padding-top: 0.5rem;
+      padding-bottom: 0.5rem;
+    }
+
+    .table-cards td[data-prose='true']::before {
+      display: block;
+      margin-bottom: 0.3rem;
+    }
+
+    .table-cards td[data-prose='true'] .td-value {
+      text-align: left;
+    }
+  }
 }

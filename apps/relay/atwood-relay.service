@@ -1,0 +1,34 @@
+[Unit]
+Description=Atwood Relay — ConversationRelay WebSocket service
+Documentation=file:/home/col/receptionist-platform/apps/relay/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/col/receptionist-platform/apps/relay
+
+# The tarball Node, not the system one.
+#
+# `/usr/bin/node` has no TypeScript support and `--experimental-strip-types` is *accepted*
+# by it and then silently does nothing, so the service would fail in a way that reads as a
+# syntax error in our code rather than as the wrong runtime. `~/.local/node/bin` is also not
+# on the default PATH, so this has to be an absolute path.
+ExecStart=/home/col/.local/node/bin/node --experimental-strip-types --env-file=/home/col/receptionist-platform/apps/web/.env.local src/server.ts
+
+# One env file, read by both the web app and this service. That is deliberate: the auth
+# token used to validate a handshake must be the same one Twilio signed with, and two
+# copies of it is a drift waiting to happen. Node aborts if the file is missing, which is
+# the correct failure — a relay with no token rejects every call.
+Restart=always
+RestartSec=5
+Environment=RELAY_PORT=3002
+Environment=NODE_ENV=production
+
+# Light hardening, matching sam-voice.service. ProtectSystem/ProtectHome are deliberately
+# not set: this reads its env file from under /home/col, and strict read-only would break it.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

@@ -287,7 +287,8 @@ export function buildMissedCallTwiml(options: {
  * `DialCallStatus`, which is unambiguous. A `<Redirect>` has no leg to report — the
  * parent call is still up, so `CallStatus` reads `in-progress` and `isMissed` comes
  * out false. Without an explicit marker the follow-up SMS never fires on a number
- * with nowhere to forward to, which is precisely how Parkfords is configured.
+ * with nowhere to forward to — which is the case for any tenant running in
+ * `conversational` mode, where no forwarding leg is placed at all.
  */
 export const MISSED_REDIRECT_PARAM = 'atwood_missed';
 
@@ -367,6 +368,130 @@ export function buildGatherTwiml(options: {
   }
 
   parts.push('  <Hangup/>', '</Response>');
+  return parts.join('\n');
+}
+
+/**
+ * TwiML that hands the call to a WebSocket, for a conversational assistant.
+ *
+ * This is the entry point to Phase C, and the reason it is small is that Twilio does
+ * the hard half. `<ConversationRelay>` runs the speech recognition and the speech
+ * synthesis on their side and exchanges **text** with our socket, so there is no audio
+ * codec here, no 8kHz μ-law resampling, and no streaming-transcription engine to buy
+ * or build. Barge-in arrives as an `interrupt` message on the socket rather than as a
+ * problem we have to solve in audio.
+ *
+ * What that leaves us is the model, which is where the latency budget says the risk
+ * was all along.
+ *
+ * Four choices worth stating, because each one is a failure mode avoided:
+ *
+ *  * **`url` is checked for `wss://` here rather than left to Twilio.** Twilio requires
+ *    a secure WebSocket and rejects anything else at connect time, which arrives as a
+ *    failed call with the reason buried in the call's own debugger. Throwing here turns
+ *    a silent dead call into a named config error at the point the TwiML is built.
+ *  * **`welcomeGreeting` belongs in the TwiML, not in the socket's `setup` handler.**
+ *    If it is sent from the socket, a socket that fails to connect produces unbroken
+ *    silence and the caller cannot tell a broken deployment from a quiet one. Spoken
+ *    from the TwiML it always plays, so the caller always hears something, and the
+ *    first socket-sent turn is then a *distinct* signal that the socket itself is live.
+ *  * **`interruptible` is left at its default (`any`) for a conversation.** Muting
+ *    barge-in is the single fastest way to make an assistant feel broken: the caller
+ *    talks, nothing stops, and they conclude it is not listening.
+ *  * **`dtmfDetection` stays off unless asked for.** It exists so a caller can press a
+ *    key without speaking, but leaving it on in a purely conversational flow puts a
+ *    second input channel on the call that nothing is handling.
+ */
+export function buildConversationRelayTwiml(options: {
+  /** The `wss://` URL of our WebSocket. Must be secure; Twilio rejects anything else. */
+  url: string;
+  /** Spoken immediately on connect, before the socket has done anything. */
+  welcomeGreeting?: string;
+  /** BCP-47 tag for both directions unless the more specific pair below is set. */
+  language?: string;
+  /**
+   * BCP-47 tag for speech only. Takes precedence over `language` for TTS.
+   *
+   * Worth setting explicitly wherever a voice is pinned. `language` supplies the TTS
+   * language by fallback when this is absent, so a voice and an accent can end up
+   * inherited from two different defaults and neither is visible in the TwiML.
+   */
+  ttsLanguage?: string;
+  ttsProvider?: 'Google' | 'Amazon' | 'ElevenLabs';
+  /** Provider-specific voice name. Omitted means the provider's default. */
+  voice?: string;
+  transcriptionProvider?: 'Google' | 'Deepgram';
+  /** Provider-specific recognition model. */
+  speechModel?: string;
+  interruptible?: 'none' | 'dtmf' | 'speech' | 'any';
+  dtmfDetection?: boolean;
+  /**
+   * Extra values delivered to the socket in the `setup` message's `customParameters`.
+   *
+   * This is how the socket learns which tenant it is speaking for. It is carried in the
+   * TwiML, which is signature-protected, so a caller cannot choose their own tenant by
+   * putting something on the query string.
+   */
+  parameters?: Record<string, string>;
+}): string {
+  if (!options.url.startsWith('wss://')) {
+    throw badRequest(
+      `ConversationRelay url must start with wss://, got "${options.url}". ` +
+        'Twilio requires a secure WebSocket and will fail the call on anything else.',
+    );
+  }
+
+  const attributes: string[] = [`url="${escapeXml(options.url)}"`];
+
+  // Only emit what was asked for. Unset attributes are Twilio's defaults by definition,
+  // and pinning a provider or a voice that nobody chose makes a later change look like
+  // it had no effect.
+  if (options.welcomeGreeting) {
+    attributes.push(`welcomeGreeting="${escapeXml(options.welcomeGreeting)}"`);
+  }
+  if (options.language) {
+    attributes.push(`language="${escapeXml(options.language)}"`);
+  }
+  if (options.ttsLanguage) {
+    attributes.push(`ttsLanguage="${escapeXml(options.ttsLanguage)}"`);
+  }
+  if (options.ttsProvider) {
+    attributes.push(`ttsProvider="${escapeXml(options.ttsProvider)}"`);
+  }
+  if (options.voice) {
+    attributes.push(`voice="${escapeXml(options.voice)}"`);
+  }
+  if (options.transcriptionProvider) {
+    attributes.push(`transcriptionProvider="${escapeXml(options.transcriptionProvider)}"`);
+  }
+  if (options.speechModel) {
+    attributes.push(`speechModel="${escapeXml(options.speechModel)}"`);
+  }
+  if (options.interruptible) {
+    attributes.push(`interruptible="${escapeXml(options.interruptible)}"`);
+  }
+  if (options.dtmfDetection) {
+    attributes.push('dtmfDetection="true"');
+  }
+
+  const parameters = Object.entries(options.parameters ?? {});
+  const parts = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Response>',
+    '  <Connect>',
+  ];
+
+  if (parameters.length === 0) {
+    parts.push(`    <ConversationRelay ${attributes.join(' ')} />`);
+  } else {
+    parts.push(`    <ConversationRelay ${attributes.join(' ')}>`);
+    for (const [name, value] of parameters) {
+      parts.push(`      <Parameter name="${escapeXml(name)}" value="${escapeXml(value)}" />`);
+    }
+    parts.push('    </ConversationRelay>');
+  }
+
+  parts.push('  </Connect>', '</Response>');
   return parts.join('\n');
 }
 

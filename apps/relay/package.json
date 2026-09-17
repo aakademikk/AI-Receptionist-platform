@@ -1,0 +1,21 @@
+{
+  "name": "@atwood/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ConversationRelay WebSocket service — the conversational voice half of the platform.",
+  "scripts": {
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@atwood/core": "workspace:*",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2"
+  }
+}

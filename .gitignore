@@ -11,6 +11,12 @@ coverage/
 .env.*.local
 !.env.example
 
+# Local environment backups — never commit these. The repo is public, so a
+# committed backup is world-readable, not just local. Covers the
+# .env.local.bak-<date> files the existing patterns above do not match.
+.env*.bak
+.env*.bak-*
+
 .vercel
 .turbo
 .supabase/

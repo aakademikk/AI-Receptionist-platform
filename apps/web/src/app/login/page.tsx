@@ -38,12 +38,23 @@ export default async function LoginPage({
     const { error: signInError } = await supabase.auth.signInWithOtp({
       email,
       options: {
+        // Only mail addresses that already have an account. Without this, an unknown
+        // address silently creates a new auth.users row — an unauthenticated write
+        // and outbound-mail surface on a public URL.
+        shouldCreateUser: false,
         // The callback exchanges the code for a session and then forwards to `next`.
         emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
       },
     });
 
     if (signInError) {
+      // `shouldCreateUser: false` makes an unknown address fail with `otp_disabled`.
+      // Show the same "check your email" screen as a real send — answering with an
+      // error here would tell a stranger which addresses have accounts on this box.
+      if (signInError.code === 'otp_disabled') {
+        redirect(`/login?sent=1&next=${encodeURIComponent(nextPath)}`);
+      }
+
       // A misconfigured Supabase URL arrives here as a JSON parse error, which tells
       // the reader nothing. Translate it before it reaches the form.
       const message = explainAuthError(signInError.message, publicEnv.supabaseUrl);
@@ -55,15 +66,14 @@ export default async function LoginPage({
 
   return (
     <main className="relative mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6 py-16">
-      {/* Ambient brand glow behind the card. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-        style={{
-          background:
-            'radial-gradient(50% 45% at 50% 35%, color-mix(in srgb, var(--brand-accent) 12%, transparent), transparent 70%)',
-        }}
-      />
+      {/*
+        The ambient glow that sits behind this card is no longer here. It was a 12%
+        radial painted into this column, and this column is `max-w-md` -- so it faded
+        out at the edges of the form rather than filling the screen. The backdrop now
+        comes from `.ambient` on <body>, which is full-bleed, and from the shared
+        `--ambient-backdrop` token so the login screen and the dashboard cannot drift
+        apart.
+      */}
 
       <div className="relative mb-8">
         <h1 className="text-gradient text-3xl font-bold tracking-tight">Atwood Systems</h1>

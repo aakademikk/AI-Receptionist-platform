@@ -5,9 +5,19 @@
 -- the n8n workflows have something to route to. Runs automatically on
 -- `supabase db reset`.
 --
--- The tenant is Parkfords Property Management, matching the example in the brief.
+-- The tenant is VOLTA, a fictional electrical contractor — the same firm as the 3D
+-- demo site at /home/col/Atwood_demos/volta-electric (live at
+-- volta-electric-demo.vercel.app). The services, prices, coverage list and contact
+-- details below are transcribed from that site's src/config.ts rather than invented
+-- here, so the receptionist demo and the website demo cannot drift on anything a
+-- caller might be told.
+--
+-- It used to be a property manager named after a real client. That is a bad
+-- fixture: a demo gets shown to strangers, and the strangers are often in the same
+-- trade as the name on it.
+--
 -- Numbers are in Ofcom's reserved-for-drama range (+4411349600xx) so nothing here
--- can dial a real person.
+-- can dial a real person, and the email uses `.example`, which can never resolve.
 -- =============================================================================
 
 -- A dev login: dev@atwood.systems. Sign in at /login — the app is magic-link only,
@@ -134,8 +144,8 @@ end $$;
 insert into public.businesses (id, slug, name, status, plan, timezone, default_region)
 values (
   '10000000-0000-4000-8000-000000000001',
-  'parkfords',
-  'Parkfords Property Management',
+  'volta',
+  'VOLTA Electrical Contractors',
   'active',
   'growth',
   'Europe/London',
@@ -154,27 +164,38 @@ on conflict (business_id, user_id) do nothing;
 
 -- The profile row was auto-created by trigger; fill it in.
 update public.business_profiles set
-  legal_name = 'Parkfords Property Management Ltd',
-  trading_name = 'Parkfords Property Management',
-  tagline = 'Block and estate management across West Yorkshire',
-  description = 'Parkfords is an independent property management firm looking after residential blocks, estates and lettings across Leeds and the surrounding area. Established 2009.',
-  industry = 'Property Management',
-  founded_year = 2009,
-  website_url = 'https://parkfords.example.com',
-  email = 'hello@parkfords.example.com',
-  phone = '+441134960001',
-  address_line1 = '14 Wellington Place',
-  city = 'Leeds',
-  region = 'West Yorkshire',
-  postcode = 'LS1 4AP',
+  legal_name = 'Volta Electrical Contractors Ltd (demo)',
+  trading_name = 'VOLTA',
+  tagline = 'Electrical, wired properly.',
+  description = 'Certified electricians for rewires, EV chargers, lighting and consumer units. We wire it once, we wire it right — and we leave the place cleaner than we found it.',
+  industry = 'Electrical services',
+  founded_year = null,
+  website_url = 'https://volta-electric-demo.vercel.app',
+  email = 'hello@volta.example',
+  phone = '+441632960489',
+  address_line1 = null,
+  city = 'Southend-on-Sea',
+  region = 'Essex',
+  postcode = null,
   country = 'United Kingdom',
-  brand_primary = '#12324A',
-  brand_accent = '#C9873D',
+  -- The demo site's own palette, light-mode values from its index.css.
+  brand_primary = '#0d9a83',
+  brand_accent = '#0ab3a0',
+  brand_background = '#faf7f0',
+  brand_foreground = '#191a17',
   tone_of_voice = 'warm, professional, plain-spoken; no jargon; never pushy',
-  ai_assistant_name = 'Robin',
+  ai_assistant_name = 'Amy',
+  -- The SMS missed-call line, and the one place apologising for a missed call is right.
   greeting_template = 'Hi, thanks for contacting {{business_name}}. We''re sorry we missed your call. How can we help today?',
+  -- Spoken on an answered call, so it must not apologise for a missed one. Set explicitly
+  -- rather than left NULL so the demo tenant carries the line an owner would edit.
+  voice_greeting_template = 'Hello, you''ve reached {{business_name}}. I''m {{assistant_name}}, the automated assistant. How can I help today?',
   signature = '— {{assistant_name}} at {{business_name}}',
-  custom_instructions = 'If a caller mentions a leak, flood, fire, gas smell or anything that sounds like it could damage property or hurt someone, treat it as an emergency and escalate immediately. Do not attempt to triage it yourself.'
+  custom_instructions = 'Electrical emergencies first. If a caller mentions a burning smell, smoke, exposed or damaged wiring, a shock, water near electrics, or a total loss of power, treat it as an emergency, take their details and escalate immediately — do not attempt to triage it yourself.'
+    || E'\n\n'
+    || 'Never quote a price as final. Published "from" prices and the estimate bands are fine to repeat, and you must always say a fixed price follows a survey and is agreed in writing before any work starts. Never give a price for a job that is not on the published list — take the details and say someone will come back with a figure.'
+    || E'\n\n'
+    || 'We cover Southend, Rayleigh, Basildon, Wickford, Chelmsford, Brentwood, Billericay, Rochford, Benfleet, Canvey, Maldon and Braintree. For anywhere else, take the details rather than turning the job down — bigger jobs travel.'
 where business_id = '10000000-0000-4000-8000-000000000001';
 
 update public.business_settings set
@@ -200,71 +221,86 @@ on conflict (e164) do nothing;
 
 insert into public.services (business_id, name, description, category, price_text, duration_minutes, is_bookable, sort_order)
 values
-  ('10000000-0000-4000-8000-000000000001', 'Block Management',
-   'Full management of residential blocks: service charge collection, contractor management, statutory compliance and Section 20 consultation.',
-   'Management', 'from £45 per unit per month', null, false, 1),
-  ('10000000-0000-4000-8000-000000000001', 'Estate Management',
-   'Grounds, communal areas and shared infrastructure for freehold estates.',
-   'Management', 'from £28 per unit per month', null, false, 2),
-  ('10000000-0000-4000-8000-000000000001', 'Property Valuation',
-   'Market appraisal for sale or lettings, carried out in person by a MRICS surveyor.',
-   'Advisory', 'Free, no obligation', 45, true, 3),
-  ('10000000-0000-4000-8000-000000000001', 'Lettings Management',
-   'Tenant find, referencing, rent collection and periodic inspections.',
-   'Lettings', '9% of monthly rent (+VAT)', null, false, 4),
-  ('10000000-0000-4000-8000-000000000001', 'Compliance Audit',
-   'Fire risk, asbestos, legionella and EICR review with a prioritised action plan.',
-   'Compliance', 'POA', 90, true, 5)
+  ('10000000-0000-4000-8000-000000000001', 'Rewires & fuseboards',
+   'Full and partial rewires, consumer unit upgrades to current 18th Edition regs.',
+   'Rewires', 'from £850', null, false, 1),
+  ('10000000-0000-4000-8000-000000000001', 'EV chargers',
+   'Home and workplace charge points — supply checked and sized before we quote.',
+   'EV', 'from £900', null, true, 2),
+  ('10000000-0000-4000-8000-000000000001', 'Lighting design',
+   'Downlights, garden, emergency and feature lighting, designed then installed.',
+   'Lighting', 'from £220', null, true, 3),
+  ('10000000-0000-4000-8000-000000000001', 'Testing & certificates',
+   'EICRs, landlord certificates, periodic inspections and fault finding.',
+   'Testing', 'from £150', 60, true, 4),
+  ('10000000-0000-4000-8000-000000000001', 'Sockets & repairs',
+   'Extra sockets, faulty circuits, tripping breakers — usually a same-week visit.',
+   'Repairs', 'from £90', null, true, 5),
+  ('10000000-0000-4000-8000-000000000001', 'Commercial fit-out',
+   'Offices, workshops and retail units — three-phase, distribution and emergency systems.',
+   'Commercial', 'on survey', null, false, 6)
 on conflict (business_id, name) do nothing;
 
 insert into public.service_areas (business_id, name, postcode_prefixes, radius_miles, sort_order)
 values
-  ('10000000-0000-4000-8000-000000000001', 'Leeds',
-   array['LS1','LS2','LS3','LS4','LS5','LS6','LS7','LS8','LS11','LS12'], 12, 1),
-  ('10000000-0000-4000-8000-000000000001', 'Wakefield',
-   array['WF1','WF2','WF3','WF4'], 10, 2),
-  ('10000000-0000-4000-8000-000000000001', 'Bradford',
-   array['BD1','BD2','BD3','BD4','BD5'], 10, 3)
+  ('10000000-0000-4000-8000-000000000001', 'Southend',   array['SS0','SS1','SS2','SS3'], 15, 1),
+  ('10000000-0000-4000-8000-000000000001', 'Rayleigh',   array['SS6'], 15, 2),
+  ('10000000-0000-4000-8000-000000000001', 'Basildon',   array['SS13','SS14','SS15','SS16'], 15, 3),
+  ('10000000-0000-4000-8000-000000000001', 'Wickford',   array['SS11','SS12'], 15, 4),
+  ('10000000-0000-4000-8000-000000000001', 'Chelmsford', array['CM1','CM2','CM3'], 20, 5),
+  ('10000000-0000-4000-8000-000000000001', 'Brentwood',  array['CM13','CM14','CM15'], 20, 6),
+  ('10000000-0000-4000-8000-000000000001', 'Billericay', array['CM11','CM12'], 15, 7),
+  ('10000000-0000-4000-8000-000000000001', 'Rochford',   array['SS4'], 15, 8),
+  ('10000000-0000-4000-8000-000000000001', 'Benfleet',   array['SS7'], 15, 9),
+  ('10000000-0000-4000-8000-000000000001', 'Canvey',     array['SS8'], 15, 10),
+  ('10000000-0000-4000-8000-000000000001', 'Maldon',     array['CM9'], 20, 11),
+  ('10000000-0000-4000-8000-000000000001', 'Braintree',  array['CM7','CM77'], 25, 12)
 on conflict (business_id, name) do nothing;
 
--- Mon–Fri 9–5:30, Sat morning, closed Sunday.
+-- A trade's week, not an office's: Mon–Fri 8–5, Saturday morning, closed Sunday.
 insert into public.opening_hours (business_id, day_of_week, opens_at, closes_at, is_closed)
 values
   ('10000000-0000-4000-8000-000000000001', 0, null, null, true),
-  ('10000000-0000-4000-8000-000000000001', 1, '09:00', '17:30', false),
-  ('10000000-0000-4000-8000-000000000001', 2, '09:00', '17:30', false),
-  ('10000000-0000-4000-8000-000000000001', 3, '09:00', '17:30', false),
-  ('10000000-0000-4000-8000-000000000001', 4, '09:00', '17:30', false),
-  ('10000000-0000-4000-8000-000000000001', 5, '09:00', '17:00', false),
-  ('10000000-0000-4000-8000-000000000001', 6, '09:30', '12:30', false)
+  ('10000000-0000-4000-8000-000000000001', 1, '08:00', '17:00', false),
+  ('10000000-0000-4000-8000-000000000001', 2, '08:00', '17:00', false),
+  ('10000000-0000-4000-8000-000000000001', 3, '08:00', '17:00', false),
+  ('10000000-0000-4000-8000-000000000001', 4, '08:00', '17:00', false),
+  ('10000000-0000-4000-8000-000000000001', 5, '08:00', '17:00', false),
+  ('10000000-0000-4000-8000-000000000001', 6, '09:00', '13:00', false)
 on conflict (business_id, day_of_week) do nothing;
 
 insert into public.knowledge_items (business_id, kind, title, content, sort_order)
 values
-  ('10000000-0000-4000-8000-000000000001', 'faq',
-   'How quickly do you respond to maintenance issues?',
-   'Emergencies (leaks, loss of power, anything unsafe) are attended within 4 hours, 24/7. Urgent non-emergency issues are attended within 2 working days. Routine issues are scheduled within 10 working days.', 1),
-  ('10000000-0000-4000-8000-000000000001', 'faq',
-   'Do you handle service charge disputes?',
-   'Yes. We prepare the statutory documentation, handle correspondence with leaseholders, and can represent the freeholder at First-tier Tribunal if it gets that far.', 2),
-  ('10000000-0000-4000-8000-000000000001', 'faq',
-   'Can you take over management from another agent?',
-   'Yes, and it is a large part of what we do. We handle the handover paperwork and the transfer of funds and records. Typical changeover takes 4 to 6 weeks.', 3),
-  ('10000000-0000-4000-8000-000000000001', 'faq',
-   'What is your notice period?',
-   'Three months, with no exit fee. We do not lock clients into long contracts.', 4),
-  ('10000000-0000-4000-8000-000000000001', 'policy',
-   'Out of hours emergencies',
-   'The emergency line is staffed 24/7 for genuine emergencies only: uncontrolled water, gas smell, fire damage, total power loss to communal areas, or anything presenting a risk to safety. Everything else is handled the next working day.', 5),
   ('10000000-0000-4000-8000-000000000001', 'about',
-   'About Parkfords',
-   'Founded in 2009 by two chartered surveyors, Parkfords manages just over 4,000 units across West Yorkshire. We are deliberately independent and deliberately mid-sized: large enough to have in-house compliance and accounts teams, small enough that clients speak to the same manager every time. RICS regulated and TPI member.', 6)
+   'About VOLTA',
+   'VOLTA is an electrical contractor working across Essex. We do domestic and commercial work — from an extra socket to a full commercial fit-out — and every job is tested and certified, whatever its size. NICEIC-approved, 18th Edition, public liability insured.', 1),
+  ('10000000-0000-4000-8000-000000000001', 'faq',
+   'Are you certified?',
+   'Yes. We are NICEIC-approved and work to the 18th Edition wiring regulations, with public liability insurance. Every job is tested and you get the certificate.', 2),
+  ('10000000-0000-4000-8000-000000000001', 'policy',
+   'Is there a call-out fee?',
+   'No call-out fee. We agree a fixed price in writing before any work starts, and it does not move unless you change the job.', 3),
+  ('10000000-0000-4000-8000-000000000001', 'pricing_note',
+   'What does a job cost?',
+   'Ballpark estimates: a full rewire £2,200–£5,400; a consumer unit swap £850–£1,400; a 7kW EV charger installed £900–£1,500; lighting £220–£1,800 depending on the scheme; an EICR £150–£380 per property; small works typically £90–£600. These are estimates, not quotes — the fixed price is agreed after a survey. Anything bigger than a socket gets a free visit.', 4),
+  ('10000000-0000-4000-8000-000000000001', 'faq',
+   'How quickly can you come out?',
+   'Standard booking is usually the next few weeks. If you need it within the week we hold priority slots, and genuine emergencies are same or next day.', 5),
+  ('10000000-0000-4000-8000-000000000001', 'faq',
+   'What counts as an emergency?',
+   'A burning smell or smoke, exposed or damaged wiring, an electric shock, water near electrics, or a total loss of power. Ring immediately rather than booking online.', 6),
+  ('10000000-0000-4000-8000-000000000001', 'hours_note',
+   'When are you open?',
+   'Monday to Friday, 8am to 5pm, and Saturday 9am to 1pm. Emergency cover runs same or next day.', 7),
+  ('10000000-0000-4000-8000-000000000001', 'policy',
+   'Where do you work?',
+   'Southend, Rayleigh, Basildon, Wickford, Chelmsford, Brentwood, Billericay, Rochford, Benfleet, Canvey, Maldon and Braintree. If you are outside that list, still get in touch — we travel for bigger jobs and we will tell you straight if it does not make sense.', 8)
 on conflict do nothing;
 
 insert into public.notification_recipients (business_id, user_id, channel, destination, label)
 values
   ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001',
-   'email', 'dev@atwood.systems', 'Owner email'),
+   'email', 'colin@atwoodsystems.co.uk', 'Owner email'),
   ('10000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001',
    'dashboard', 'in-app', 'In-app')
 on conflict (business_id, channel, destination) do nothing;
@@ -284,44 +320,47 @@ begin
 
   perform public.append_message(
     v_conv, 'outbound', 'ai',
-    'Hi, thanks for contacting Parkfords Property Management. We''re sorry we missed your call. How can we help today?',
+    'Hi, thanks for contacting VOLTA. We''re sorry we missed your call. How can we help today?',
     'sms', 'twilio', 'SMseed001', 'delivered'
   );
 
   perform public.append_message(
     v_conv, 'inbound', 'customer',
-    'Hi — we''re the RMC for a 24-flat block in LS6 and we''re unhappy with our current managing agent. Wanted to see what you''d charge.',
+    'Hi, we''ve just bought a 1930s semi in SS2 and the survey flagged the wiring — it''s still on the old fuse board. What would a rewire cost?',
     'sms', 'twilio', 'SMseed002', 'received'
   );
 
+  -- The reply the prompt is written to produce: a published band, an explicit "that is not a
+  -- quote", and a question. It never lands on a single figure, because the fixed price is
+  -- agreed after a survey and the tenant's custom instructions say so.
   perform public.append_message(
     v_conv, 'outbound', 'ai',
-    'Happy to help — taking over from another agent is a big part of what we do. Block management starts from £45 per unit per month, so I can get you a proper figure once we know the scope. Could I take your name, and is the block LS6 something you''d want us to look at in person?',
+    'A full rewire usually comes in between £2,200 and £5,400 depending on the size of the house and how much access there is, and a consumer unit swap on its own runs £850 to £1,400. Those are estimates rather than a quote — the fixed price comes after a free survey and is agreed in writing before we start. Could I take your name, and is the house empty while the work happens or are you living in it?',
     'sms', 'twilio', 'SMseed003', 'delivered'
   );
 
   perform public.append_message(
     v_conv, 'inbound', 'customer',
-    'It''s Marcus Reed, chair of the RMC. Yes please — postcode is LS6 2AH. Best to call me after 5pm.',
+    'It''s Dan Whitfield. We''re living in it — moving in next month. Postcode is SS2 5BX. Best to ring me after 6pm.',
     'sms', 'twilio', 'SMseed004', 'received'
   );
 
   perform public.upsert_lead(v_conv, jsonb_build_object(
-    'name', 'Marcus Reed',
+    'name', 'Dan Whitfield',
     'phone', '+447700900123',
     'email', '',
-    'postcode', 'LS6 2AH',
-    'service', 'Block Management',
-    'enquiry', 'RMC for a 24-flat block in LS6, unhappy with current managing agent, wants a quote and a site visit.',
-    'summary', 'RMC chair for 24-flat block in LS6 looking to switch managing agent. Wants a quote; prefers a callback after 5pm.',
+    'postcode', 'SS2 5BX',
+    'service', 'Rewires & fuseboards',
+    'enquiry', 'Bought a 1930s semi in SS2, survey flagged the wiring and it is still on an old fuse board. Wants a rewire quote and a survey.',
+    'summary', 'New homeowner in SS2 with a 1930s semi on an old fuse board, wants a rewire quote. Family will be living in the property during the work. Prefers a callback after 6pm.',
     'urgency', 'normal',
     'lead_status', 'qualified',
-    'callback_time', 'after 5pm'
+    'callback_time', 'after 6pm'
   ));
 
   update public.conversations
-  set summary = 'RMC chair for a 24-flat LS6 block wants to switch managing agent. Quote requested; callback after 5pm.',
-      current_topic = 'block management quote / agent switch'
+  set summary = 'New homeowner in SS2 wants a rewire quote on a 1930s semi. Survey requested; callback after 6pm.',
+      current_topic = 'rewire quote / consumer unit'
   where id = v_conv;
 
   -- A second thread, escalated, so the handover queue has a row.
@@ -331,25 +370,25 @@ begin
 
   perform public.append_message(
     v_missed.conversation_id, 'outbound', 'ai',
-    'Hi, thanks for contacting Parkfords Property Management. We''re sorry we missed your call. How can we help today?',
+    'Hi, thanks for contacting VOLTA. We''re sorry we missed your call. How can we help today?',
     'sms', 'twilio', 'SMseed005', 'delivered'
   );
 
   perform public.append_message(
     v_missed.conversation_id, 'inbound', 'customer',
-    'There is water coming through the ceiling of the communal stairwell and it''s getting worse. I need someone NOW.',
+    'There''s a burning smell coming from the fuse board and the lights keep flickering. I''ve got two young kids in the house. I need someone NOW.',
     'sms', 'twilio', 'SMseed006', 'received'
   );
 
   perform public.request_handover(
     v_missed.conversation_id, 'emergency',
-    'Active water ingress reported in a communal area — matched the emergency rule in the tenant''s custom instructions.'
+    'Burning smell from the consumer unit with flickering lights, children in the property — matched the electrical emergency rule in the tenant''s custom instructions.'
   );
 
   perform public.enqueue_notification(
     '10000000-0000-4000-8000-000000000001', 'handover_required',
-    'Emergency: water ingress in communal stairwell',
-    'A caller reports active water ingress getting worse. The AI has stepped back and the thread is waiting for a human.',
+    'Emergency: burning smell from the consumer unit',
+    'A caller reports a burning smell from the fuse board with flickering lights, and young children in the property. The AI has stepped back and the thread is waiting for a human.',
     '{}'::jsonb, v_missed.conversation_id, null, null,
     'seed-handover:' || v_missed.conversation_id::text
   );

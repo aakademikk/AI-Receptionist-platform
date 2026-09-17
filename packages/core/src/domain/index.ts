@@ -57,6 +57,12 @@ export {
   type HandleInboundMessageResult,
 } from './pipeline.ts';
 
+export {
+  replyToCaller,
+  type VoiceTurnInput,
+  type VoiceTurnResult,
+} from './voice.ts';
+
 export { runOnboarding, applyOnboarding } from './onboarding.ts';
 
 export {

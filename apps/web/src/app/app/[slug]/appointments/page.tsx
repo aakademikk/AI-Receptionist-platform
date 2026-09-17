@@ -69,7 +69,7 @@ export default async function AppointmentsPage({ params }: { params: Promise<{ s
           <tbody>
             {appointments.map((appointment) => (
               <tr key={appointment.id}>
-                <Td>
+                <Td label="When">
                   <span className="font-medium">
                     {new Date(appointment.starts_at).toLocaleString('en-GB', {
                       timeZone: appointment.timezone,
@@ -81,7 +81,7 @@ export default async function AppointmentsPage({ params }: { params: Promise<{ s
                     })}
                   </span>
                 </Td>
-                <Td>
+                <Td label="Customer">
                   {appointment.conversation_id ? (
                     <a
                       href={`/app/${slug}/conversations/${appointment.conversation_id}`}
@@ -93,13 +93,15 @@ export default async function AppointmentsPage({ params }: { params: Promise<{ s
                     (appointment.customer_name ?? '—')
                   )}
                 </Td>
-                <Td>
+                <Td label="Status">
                   <Badge tone={TONE[appointment.status] ?? 'neutral'}>
                     {appointment.status.replaceAll('_', ' ')}
                   </Badge>
                 </Td>
-                <Td muted>
-                  <span className="line-clamp-2 max-w-[380px]">{appointment.notes ?? '—'}</span>
+                <Td label="Notes" muted prose>
+                  <span className="line-clamp-3 sm:line-clamp-2 sm:max-w-[380px]">
+                    {appointment.notes ?? '—'}
+                  </span>
                 </Td>
               </tr>
             ))}

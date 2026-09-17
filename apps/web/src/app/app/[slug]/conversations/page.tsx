@@ -138,7 +138,7 @@ export default async function ConversationsPage({
           <tbody>
             {conversations.map((conversation) => (
               <tr key={conversation.id}>
-                <Td>
+                <Td label="">
                   <a
                     href={`/app/${slug}/conversations/${conversation.id}`}
                     className="font-medium hover:underline"
@@ -151,7 +151,7 @@ export default async function ConversationsPage({
                     {conversation.channel}
                   </div>
                 </Td>
-                <Td>
+                <Td label="Status">
                   <Badge tone={STATUS_TONE[conversation.status] ?? 'neutral'}>
                     {conversation.status.replaceAll('_', ' ')}
                   </Badge>
@@ -161,12 +161,14 @@ export default async function ConversationsPage({
                     </div>
                   ) : null}
                 </Td>
-                <Td muted>{conversation.lead_status.replaceAll('_', ' ')}</Td>
-                <Td muted>
-                  <span className="line-clamp-2 max-w-[420px]">{conversation.summary ?? '—'}</span>
+                <Td label="Lead" muted>{conversation.lead_status.replaceAll('_', ' ')}</Td>
+                <Td label="Summary" muted prose>
+                  <span className="line-clamp-3 sm:line-clamp-2 sm:max-w-[420px]">
+                    {conversation.summary ?? '—'}
+                  </span>
                 </Td>
-                <Td align="right">{conversation.message_count}</Td>
-                <Td align="right" muted>
+                <Td label="Messages" align="right">{conversation.message_count}</Td>
+                <Td label="Last activity" align="right" muted>
                   {formatRelative(conversation.last_message_at)}
                 </Td>
               </tr>

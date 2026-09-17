@@ -4,6 +4,7 @@ export {
   buildMissedCallTwiml,
   buildHangupTwiml,
   buildGatherTwiml,
+  buildConversationRelayTwiml,
   MISSED_REDIRECT_PARAM,
   markMissedRedirect,
   isMissedRedirect,

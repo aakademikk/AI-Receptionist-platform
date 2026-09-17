@@ -21,7 +21,7 @@ function makeContext(overrides: Partial<BusinessContext['settings']> = {}): Busi
     currency: 'GBP',
     profile: {
       trading_name: 'Test Co',
-      ai_assistant_name: 'Robin',
+      ai_assistant_name: 'Amy',
       tone_of_voice: 'warm',
       brand_primary: '#000000',
       brand_accent: '#111111',

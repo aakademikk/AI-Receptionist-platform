@@ -1,21 +1,32 @@
 import {
   buildMissedCallTwiml,
   getAdminClient,
+  loadBusinessContext,
   logger,
   markMissedRedirect,
   normalizePhone,
   parseInboundCall,
   parseTwilioForm,
+  renderVoiceGreeting,
   requireValidTwilioSignature,
 } from '@atwood/core';
 
+import { conversationRelayTwiml } from '@/lib/conversation-relay';
 import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
 
 /**
  * POST /api/webhooks/twilio/voice
  *
- * The inbound-call webhook. Returns TwiML that tries the business's own line and,
- * if that goes unanswered, calls the `action` URL — which is what triggers the SMS.
+ * The inbound-call webhook, and the only Voice URL the platform needs.
+ *
+ * It answers one of two ways, decided by `phone_numbers.answer_mode` rather than by
+ * which URL the number points at:
+ *
+ *  - `dial_through` (the default, and every number's behaviour before 0012) — return
+ *    TwiML that tries the business's own line and, if that goes unanswered, calls the
+ *    `action` URL, which is what triggers the SMS.
+ *  - `conversational` — hand the call to the ConversationRelay socket and let the
+ *    assistant hold it. `forward_to` is not consulted; nothing is dialled.
  *
  * Letting `<Dial>` decide whether the call was missed is far more reliable than
  * inferring it from call-status transitions: Twilio tells us the outcome of the
@@ -23,8 +34,9 @@ import { reconstructUrl, withTwilioWebhook } from '@/lib/twilio-webhook';
  * rang out, or failed.
  *
  * This must respond fast and synchronously — the caller is listening to silence
- * until it does — so it does the minimum: verify, resolve the number, return TwiML.
- * Everything else happens on the action callback.
+ * until it does — so it does the minimum: verify, resolve the number, and on the
+ * conversational branch read the tenant's greeting to say first. Everything else happens
+ * on the action callback or on the socket.
  */
 export const POST = withTwilioWebhook(async (request: Request): Promise<Response> => {
   const raw = await request.text();
@@ -54,7 +66,7 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
   // One indexed read. A globally unique e164 is what makes routing this cheap.
   const { data } = await getAdminClient()
     .from('phone_numbers')
-    .select('business_id, forward_to, voice_greeting_url, missed_call_enabled')
+    .select('business_id, forward_to, voice_greeting_url, missed_call_enabled, answer_mode')
     .eq('e164', toNumber)
     .is('released_at', null)
     .maybeSingle();
@@ -64,6 +76,7 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
     forward_to: string | null;
     voice_greeting_url: string | null;
     missed_call_enabled: boolean;
+    answer_mode: string;
   } | null;
 
   if (!number) {
@@ -77,7 +90,43 @@ export const POST = withTwilioWebhook(async (request: Request): Promise<Response
     businessId: number.business_id,
     callSid: call.callSid,
     to: toNumber,
+    answerMode: number.answer_mode,
   });
+
+  /*
+   * The one branch that decides how the call is answered.
+   *
+   * Checked positively for `conversational` rather than negatively for `dial_through`, so
+   * that anything unexpected falls through to dialling the business's own line. That is
+   * the safe direction: the worst case is a call that rings a human who was expecting the
+   * assistant, rather than an automated voice on a line that was supposed to ring a human.
+   * The check constraint on the column means the other value is unreachable anyway.
+   */
+  if (number.answer_mode === 'conversational') {
+    /*
+     * A second read on the answer path, and the cost is accepted rather than overlooked:
+     * the caller is listening to silence while it happens. It buys the tenant's own
+     * greeting — their words, their business name — as the first thing the caller hears,
+     * and the alternative is copy in this file that belongs to the customer. The view is
+     * one round trip, and the whole branch still answers well inside Twilio's timeout.
+     *
+     * A failure here throws, which fails the call. That is deliberate: if the tenant
+     * context is unreachable the socket will fail every turn anyway, so the choice is
+     * between a fault Twilio records against the call and the caller being talked at by
+     * an assistant that cannot answer anything.
+     */
+    const context = await loadBusinessContext(number.business_id);
+
+    return twiml(
+      conversationRelayTwiml({
+        request,
+        businessId: number.business_id,
+        callSid: call.callSid,
+        to: toNumber,
+        greeting: renderVoiceGreeting(context),
+      }),
+    );
+  }
 
   return twiml(
     buildMissedCallTwiml({

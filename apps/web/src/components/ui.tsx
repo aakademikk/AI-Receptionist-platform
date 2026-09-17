@@ -253,7 +253,10 @@ export function Badge({
 
   return (
     <span
-      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
+      // `badge` carries no styling of its own here — it is the hook the phone
+      // reading-size layer in globals.css needs, because `text-[11px]` is a utility
+      // and a rule with nothing but element structure to aim at cannot beat it.
+      className="badge inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
       style={{ background: bg, color: fg, borderColor: edge }}
     >
       {children}
@@ -315,12 +318,26 @@ export function EmptyState({ title, description }: { title: string; description?
   );
 }
 
-/** Table wrapper. Scrolls horizontally in its own container so the page never does. */
+/**
+ * Table wrapper.
+ *
+ * From `sm` up this is a table: it scrolls horizontally inside its own container so
+ * the page never does. Below `sm` it stops being a table and becomes a stack of
+ * cards, one per row, because a 640px-wide grid on a 390px screen does not scroll —
+ * it clips. Measured on a phone before this changed: `NEEDS` read "Block Managemen"
+ * and the three columns past it could not be reached at all.
+ *
+ * The card form is CSS only (`.table-cards` in globals.css) so the markup stays one
+ * semantic table for screen readers and for anyone pasting it into a spreadsheet.
+ * Each cell carries its column name in `data-label`, which the card form renders as
+ * its row heading — see `Td`. A cell whose value is self-describing can pass
+ * `label=""` to suppress it.
+ */
 export function TableShell({ children }: { children: ReactNode }) {
   return (
     <div className="glass hairline overflow-hidden rounded-2xl">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] border-collapse text-left text-[13px]">
+        <table className="table-cards w-full border-collapse text-left text-[13px] sm:min-w-[640px]">
           {children}
         </table>
       </div>
@@ -346,20 +363,46 @@ export function Td({
   children,
   align = 'left',
   muted = false,
+  label,
+  prose = false,
 }: {
   children: ReactNode;
   align?: 'left' | 'right';
   muted?: boolean;
+  /**
+   * The column this cell belongs to, shown as the row heading in the phone card
+   * layout where `thead` is not rendered. Without it a stacked cell is a bare value
+   * with nothing saying what it is — "60" on its own tells you nothing. Pass `""`
+   * for a cell that reads fine alone, such as a name or a status pill.
+   */
+  label?: string;
+  /**
+   * This cell holds a sentence, not a value.
+   *
+   * On a phone the card layout right-aligns values so numbers share an edge. Prose
+   * set that way is ragged-left and reads badly, so a `prose` cell drops to its own
+   * line under its label and runs full width. No effect at desktop widths.
+   */
+  prose?: boolean;
 }) {
   return (
     <td
+      data-label={label}
+      data-prose={prose ? 'true' : undefined}
       className={`border-b px-4 py-3 align-top ${align === 'right' ? 'text-right tnum' : ''}`}
       style={{
         color: muted ? 'var(--text-secondary)' : 'var(--text-primary)',
         borderColor: 'var(--border-subtle)',
       }}
     >
-      {children}
+      {/*
+        One wrapper so the card layout has a single value element to place beside
+        the label. Without it, a cell with two children — a service name and a
+        summary, say — puts both directly into the cell's flex row and they render
+        side by side on top of each other. A plain block element changes nothing
+        about the table at desktop widths.
+      */}
+      <div className="td-value">{children}</div>
     </td>
   );
 }

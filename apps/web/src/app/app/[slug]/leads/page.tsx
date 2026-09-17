@@ -136,10 +136,10 @@ export default async function LeadsPage({
           <tbody>
             {leads.map((lead) => (
               <tr key={lead.id}>
-                <Td align="right">
+                <Td align="right" label="Score">
                   <span className="font-semibold">{lead.score}</span>
                 </Td>
-                <Td>
+                <Td label="">
                   <a
                     href={`/app/${slug}/conversations/${lead.conversation_id}`}
                     className="font-medium hover:underline"
@@ -150,26 +150,34 @@ export default async function LeadsPage({
                     {new Date(lead.created_at).toLocaleDateString('en-GB')}
                   </div>
                 </Td>
-                <Td muted>
+                <Td muted label="Contact">
                   <div>{formatPhoneForDisplay(lead.phone) || '—'}</div>
                   {lead.email ? <div className="text-[11px]">{lead.email}</div> : null}
                   {lead.postcode ? <div className="text-[11px]">{lead.postcode}</div> : null}
                 </Td>
-                <Td muted>
+                <Td muted label="Needs" prose>
                   <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
                     {lead.service_text ?? '—'}
                   </div>
-                  <span className="line-clamp-2 max-w-[320px]">{lead.summary ?? ''}</span>
+                  {/*
+                    The width cap and the tighter clamp are desktop concerns: they
+                    stop a long summary stretching a table column. On a phone the
+                    card is already narrower than the cap, so applying it there only
+                    cut the sentence off sooner — two lines out of four, mid-word.
+                  */}
+                  <span className="line-clamp-3 sm:line-clamp-2 sm:max-w-[320px]">
+                    {lead.summary ?? ''}
+                  </span>
                 </Td>
-                <Td>
+                <Td label="Urgency">
                   <Badge tone={URGENCY_TONE[lead.urgency] ?? 'neutral'}>{lead.urgency}</Badge>
                 </Td>
-                <Td>
+                <Td label="Status">
                   <Badge tone={lead.status === 'qualified' || lead.status === 'won' ? 'good' : 'neutral'}>
                     {lead.status}
                   </Badge>
                 </Td>
-                <Td muted>{lead.callback_text ?? '—'}</Td>
+                <Td muted label="Callback">{lead.callback_text ?? '—'}</Td>
               </tr>
             ))}
           </tbody>

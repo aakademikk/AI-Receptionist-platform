@@ -251,9 +251,9 @@ function prioritisePages(pages: CrawledPage[]): CrawledPage[] {
 /**
  * Normalise user input into a URL.
  *
- * Owners type "parkfords.co.uk". Also rejects anything that is not http(s) — this
- * value goes into a server-side fetch, so `file://` or a raw IP would be an SSRF
- * vector rather than a typo.
+ * Owners type "theirfirm.co.uk" with no scheme. Also rejects anything that is not
+ * http(s) — this value goes into a server-side fetch, so `file://` or a raw IP would
+ * be an SSRF vector rather than a typo.
  */
 export function normaliseUrl(input: string): string {
   const trimmed = input.trim();

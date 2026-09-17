@@ -145,6 +145,27 @@ export interface HandleInboundMessageInput {
   body: string;
   channel?: CommsChannel;
   providerMessageId?: string | null;
+  /**
+   * Return the reply as soon as it exists, and run the work that follows it in the
+   * background.
+   *
+   * On SMS this is not worth having. The reply is handed to a messaging workflow and the
+   * customer waits on their phone, not on the webhook, so an extra second spent
+   * extracting is invisible. On a live call it is the whole problem: everything after the
+   * reply is composed — the second model round trip for extraction, the lead row, the
+   * owner's notification — happens while the caller is listening to silence, and they
+   * have no way to tell a slow system from a dropped line.
+   *
+   * Set by the voice path only. **The work still runs, and the notifications still go
+   * out**; they simply stop standing between the model's answer and the caller hearing
+   * it. The one visible difference is that the returned `lead` is null, because it does
+   * not exist yet — which is why this is opt-in rather than the default.
+   *
+   * Safe only where the process outlives the response. The relay is a long-running
+   * service and is; a serverless invocation that returns and is frozen is not, and would
+   * drop the work silently.
+   */
+  deferExtraction?: boolean;
   traceId?: string;
 }
 
@@ -184,6 +205,10 @@ export interface HandleInboundMessageResult {
  *  5. **Extraction after the reply is composed.** The customer's answer must not
  *     wait on the CRM write.
  *  6. **Notifications last.** Never let an email provider delay a customer.
+ *
+ * Steps 5 and 6 run in the order given above, but *when* they run is the caller's
+ * decision: on a live call `deferExtraction` moves both off the path that the caller is
+ * waiting on. See the option's own comment for why that matters and where it is safe.
  */
 export async function handleInboundMessage(
   input: HandleInboundMessageInput,
@@ -269,47 +294,88 @@ export async function handleInboundMessage(
   }
 
   if (decision.shouldHandover && decision.reason) {
-    log.info('Handing over to a human', { reason: decision.reason });
+    // Captured as locals before the closure below: TypeScript drops property narrowing
+    // inside a function that may run later, and a non-null assertion here would be a
+    // claim rather than a fact.
+    const reason = decision.reason;
+    const note = decision.note;
+
+    log.info('Handing over to a human', { reason });
 
     await supabase.rpc('request_handover', {
       p_conversation_id: resolved.conversation_id,
-      p_reason: decision.reason,
-      p_note: decision.note,
+      p_reason: reason,
+      p_note: note,
     });
 
-    // Extract before notifying so the owner's alert carries the summary.
-    const lead = await extractLead({ context, memory, traceId }).catch((error) => {
-      log.warn('Extraction failed during handover', { error: String(error) });
-      return null;
-    });
+    /*
+     * Extract before notifying, so the owner's alert carries the summary rather than
+     * telling them to go and read the conversation.
+     *
+     * Written as a closure so the same two calls can either be awaited or left to finish
+     * in the background — see `deferExtraction`. One copy of them, so the two paths
+     * cannot drift into doing different things.
+     */
+    const finishHandover = async () => {
+      const lead = await extractLead({ context, memory, traceId }).catch((error) => {
+        log.warn('Extraction failed during handover', { error: String(error) });
+        return null;
+      });
 
-    await notifyHandover({
-      context,
-      conversationId: resolved.conversation_id,
-      reason: decision.reason,
-      note: decision.note,
-      summary: lead?.extraction?.summary ?? memory.summary,
-      customerName: lead?.extraction?.name ?? memory.customer_name,
-      customerPhone: input.fromNumber,
-      urgency: lead?.extraction?.urgency ?? null,
-      lastMessage: input.body,
-    });
+      await notifyHandover({
+        context,
+        conversationId: resolved.conversation_id,
+        reason,
+        note,
+        summary: lead?.extraction?.summary ?? memory.summary,
+        customerName: lead?.extraction?.name ?? memory.customer_name,
+        customerPhone: input.fromNumber,
+        urgency: lead?.extraction?.urgency ?? null,
+        lastMessage: input.body,
+      });
+
+      return lead;
+    };
+
+    const handoverReply: HandleInboundMessageResult['reply'] = decision.notifyCustomer
+      ? {
+          body: renderHandoverMessage(context, reason),
+          toNumber: input.fromNumber,
+          fromNumber,
+          channel,
+          // A handover notice is the platform speaking, not the assistant. Marking
+          // it 'system' keeps the AI-handled percentage honest.
+          sender: 'system',
+          aiLogId: null,
+        }
+      : null;
+
+    if (input.deferExtraction) {
+      /*
+       * The caller is about to hear "I'm passing you to a colleague", and on a call that
+       * sentence is the last thing they hear before the line goes quiet. Making them wait
+       * on a model round trip first turns a considered pause into a silence they will read
+       * as the call dropping. So the line goes out immediately and the owner's alert
+       * follows a moment later — unchanged, and still carrying the summary.
+       */
+      void finishHandover().catch((error) => {
+        log.warn('Handover follow-up failed', { error: String(error) });
+      });
+
+      return {
+        ...base,
+        reply: handoverReply,
+        handover: { reason, note },
+        lead: null,
+      };
+    }
+
+    const lead = await finishHandover();
 
     return {
       ...base,
-      reply: decision.notifyCustomer
-        ? {
-            body: renderHandoverMessage(context, decision.reason),
-            toNumber: input.fromNumber,
-            fromNumber,
-            channel,
-            // A handover notice is the platform speaking, not the assistant. Marking
-            // it 'system' keeps the AI-handled percentage honest.
-            sender: 'system',
-            aiLogId: null,
-          }
-        : null,
-      handover: { reason: decision.reason, note: decision.note },
+      reply: handoverReply,
+      handover: { reason, note },
       lead: lead ? { leadId: lead.leadId, score: lead.score } : null,
     };
   }
@@ -384,56 +450,79 @@ export async function handleInboundMessage(
     };
   }
 
-  // --- 5. Extract ----------------------------------------------------------
+  // --- 5 & 6. Extract, then notify -----------------------------------------
   const previousStatus = memory.lead_status;
-  const lead = await extractLead({ context, memory: memoryWithInbound, traceId }).catch((error) => {
-    // Extraction is valuable but not load-bearing: the reply still goes out, and the
-    // next inbound message re-runs it.
-    log.warn('Extraction failed', { error: String(error) });
-    return null;
-  });
 
-  // --- 6. Notify -----------------------------------------------------------
-  if (lead?.extraction) {
-    for (const event of leadNotificationEvents(lead.extraction, previousStatus)) {
-      await enqueueNotification({
-        businessId: resolved.business_id,
-        event,
-        subject: event === 'lead_qualified' ? 'New qualified lead' : 'New enquiry',
-        body: lead.extraction.summary,
-        payload: {
-          customer_name: lead.extraction.name,
-          customer_phone: lead.extraction.phone || input.fromNumber,
-          summary: lead.extraction.summary,
-          urgency: lead.extraction.urgency,
-          conversation_id: resolved.conversation_id,
-        },
-        conversationId: resolved.conversation_id,
-        leadId: lead.leadId,
-        // Namespaced by status so crossing into 'qualified' alerts once, not on
-        // every subsequent message.
-        dedupeKey: `${event}:${lead.leadId ?? resolved.conversation_id}`,
+  /*
+   * Steps 5 and 6 as one closure, for the same reason as the handover branch above: on a
+   * call they can be left to finish after the caller has heard their answer, and there
+   * must be exactly one copy of them whichever way they are called.
+   */
+  const finishReply = async () => {
+    const lead = await extractLead({ context, memory: memoryWithInbound, traceId }).catch((error) => {
+      // Extraction is valuable but not load-bearing: the reply still goes out, and the
+      // next inbound message re-runs it.
+      log.warn('Extraction failed', { error: String(error) });
+      return null;
+    });
+
+    if (lead?.extraction) {
+      for (const event of leadNotificationEvents(lead.extraction, previousStatus)) {
+        await enqueueNotification({
+          businessId: resolved.business_id,
+          event,
+          subject: event === 'lead_qualified' ? 'New qualified lead' : 'New enquiry',
+          body: lead.extraction.summary,
+          payload: {
+            customer_name: lead.extraction.name,
+            customer_phone: lead.extraction.phone || input.fromNumber,
+            summary: lead.extraction.summary,
+            urgency: lead.extraction.urgency,
+            conversation_id: resolved.conversation_id,
+          },
+          conversationId: resolved.conversation_id,
+          leadId: lead.leadId,
+          // Namespaced by status so crossing into 'qualified' alerts once, not on
+          // every subsequent message.
+          dedupeKey: `${event}:${lead.leadId ?? resolved.conversation_id}`,
+        });
+      }
+    }
+
+    // Compaction runs after the reply is composed, so it never delays the customer.
+    if (needsSummarisation(memoryWithInbound)) {
+      void summariseConversation({ context, memory: memoryWithInbound, traceId }).catch(() => {
+        /* already logged; a stale summary is an acceptable degradation */
       });
     }
+
+    return lead;
+  };
+
+  const reply: HandleInboundMessageResult['reply'] = {
+    body: generated.body,
+    toNumber: input.fromNumber,
+    fromNumber,
+    channel,
+    sender: 'ai',
+    aiLogId: generated.aiLogId,
+  };
+
+  if (input.deferExtraction) {
+    // The caller hears this now. The lead row and the owner's alert are a second behind,
+    // which is the correct order on a call and the wrong one on a text.
+    void finishReply().catch((error) => {
+      log.warn('Extraction after the reply failed', { error: String(error) });
+    });
+
+    return { ...base, reply, handover: null, lead: null };
   }
 
-  // Compaction runs after the reply is composed, so it never delays the customer.
-  if (needsSummarisation(memoryWithInbound)) {
-    void summariseConversation({ context, memory: memoryWithInbound, traceId }).catch(() => {
-      /* already logged; a stale summary is an acceptable degradation */
-    });
-  }
+  const lead = await finishReply();
 
   return {
     ...base,
-    reply: {
-      body: generated.body,
-      toNumber: input.fromNumber,
-      fromNumber,
-      channel,
-      sender: 'ai',
-      aiLogId: generated.aiLogId,
-    },
+    reply,
     handover: null,
     lead: lead ? { leadId: lead.leadId, score: lead.score } : null,
   };

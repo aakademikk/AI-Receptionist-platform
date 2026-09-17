@@ -88,17 +88,17 @@ export default async function KnowledgePage({ params }: { params: Promise<{ slug
             <tbody>
               {services.map((service) => (
                 <tr key={service.id}>
-                  <Td>
+                  <Td label="">
                     <span className="font-medium">{service.name}</span>
                     {service.description ? (
-                      <div className="mt-0.5 line-clamp-2 max-w-[420px] text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                      <div className="mt-0.5 line-clamp-3 text-[13px] sm:line-clamp-2 sm:max-w-[420px] sm:text-[12px]" style={{ color: 'var(--text-secondary)' }}>
                         {service.description}
                       </div>
                     ) : null}
                   </Td>
-                  <Td muted>{service.price_text ?? 'not published'}</Td>
-                  <Td>{service.is_bookable ? <Badge tone="info">Yes</Badge> : '—'}</Td>
-                  <Td>
+                  <Td label="Price" muted>{service.price_text ?? 'not published'}</Td>
+                  <Td label="Bookable">{service.is_bookable ? <Badge tone="info">Yes</Badge> : '—'}</Td>
+                  <Td label="Live">
                     {service.is_published ? <Badge tone="good">Live</Badge> : <Badge>Hidden</Badge>}
                   </Td>
                 </tr>
