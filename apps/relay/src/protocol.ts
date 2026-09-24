@@ -129,6 +129,39 @@ export interface RelayReply {
 
 export type RelayReplyFn = (request: RelayReplyRequest) => Promise<RelayReply>;
 
+/*
+ * The silence backstop's timings.
+ *
+ * Twilio tells us nothing when the synthesiser finishes a line: the inbound frame types
+ * are setup, prompt, dtmf, interrupt and error, and none of them means "playback ended".
+ * So the countdown cannot start when the assistant stops talking — it starts when the
+ * text is sent, plus an estimate of how long the line takes to say. Start it at send time
+ * alone and a long sign-off would trip "are you still there?" over her own voice.
+ *
+ * The rate is an estimate to be tuned on a live call. If the still-there line cuts across
+ * the end of a goodbye, lower it (a slower assumed voice means a longer wait).
+ */
+
+/** Assumed speaking rate of the synthesised voice, in characters per second. */
+export const SPEECH_CHARS_PER_SECOND = 15;
+
+/** Caller silence, after the assistant signs off, before she asks whether they are still there. */
+export const SILENCE_PROMPT_MS = 3000;
+
+/** Further caller silence, after "are you still there?", before the relay ends the call. */
+export const SILENCE_HANGUP_MS = 3000;
+
+/** Roughly how long the synthesiser takes to say `token`, in milliseconds. */
+export function estimatedSpeechMs(token: string): number {
+  return Math.ceil((token.length / SPEECH_CHARS_PER_SECOND) * 1000);
+}
+
+/** The turns after which caller silence means the call is over rather than a pause. */
+const ARMS_SILENCE_BACKSTOP: ReadonlySet<RelayReply['closing']> = new Set([
+  'asked_anything_else',
+  'wrapped_up',
+]);
+
 export interface RelaySessionOptions {
   /**
    * Caller turns before the session hangs up regardless of what the reply function says.
@@ -144,6 +177,20 @@ export interface RelaySessionOptions {
   reply?: RelayReplyFn;
   /** Called for each event once parsed, for the call log. */
   onEvent?: (event: string, fields: Record<string, unknown>) => void;
+  /**
+   * Send frames nobody asked for.
+   *
+   * Everything else this class says is the answer to a frame, returned from `handle`. The
+   * silence backstop speaks because nothing happened, so there is no `handle` call for it
+   * to return from, and it needs the socket's own send function instead.
+   */
+  send?: (frames: OutboundFrame[]) => void;
+  /**
+   * What to say when the caller has gone quiet after the assistant signed off. Injected
+   * rather than written here, because copy belongs to the domain layer and this file is
+   * transport. The silence backstop is off unless both this and `send` are given.
+   */
+  stillThereLine?: string;
 }
 
 const NO_REPLY: RelayReplyFn = async () => ({
@@ -186,10 +233,36 @@ export class RelaySession {
    */
   private anythingElseAsked = false;
 
+  private readonly send: ((frames: OutboundFrame[]) => void) | null;
+  private readonly stillThereToken: string;
+  /**
+   * The running silence countdown, if any.
+   *
+   * Armed only after the assistant has signed off or asked "anything else?", and never
+   * otherwise: mid-call, a caller may pause for as long as they like. Anything the caller
+   * does — a partial transcript included, so nobody is asked "are you still there?"
+   * mid-sentence — cancels it.
+   */
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
+
   constructor(options: RelaySessionOptions = {}) {
     this.maxTurns = options.maxTurns ?? 40;
     this.reply = options.reply ?? NO_REPLY;
     this.onEvent = options.onEvent ?? (() => {});
+    this.send = options.send ?? null;
+    // Sanitised once, here: a line that sanitises to nothing disables the backstop rather
+    // than sending the empty token Twilio drops the call for.
+    this.stillThereToken = sanitiseForSpeech(options.stillThereLine ?? '');
+  }
+
+  /**
+   * Stop anything this session has scheduled. Called when the socket closes: a timer that
+   * outlives its call has nobody to speak to.
+   */
+  dispose(): void {
+    this.disposed = true;
+    this.clearSilenceTimer();
   }
 
   /** True once we have told Twilio to end the call. */
@@ -212,6 +285,11 @@ export class RelaySession {
       // otherwise restart a call we have already finished.
       this.onEvent('frame_after_end', { type: frame.type });
       return [];
+    }
+
+    if (frame.type === 'prompt' || frame.type === 'interrupt' || frame.type === 'dtmf') {
+      // The caller is there. See `silenceTimer`.
+      this.cancelSilenceBackstop(frame.type);
     }
 
     switch (frame.type) {
@@ -335,13 +413,60 @@ export class RelaySession {
 
     if (reply.endCall || this.turns >= this.maxTurns) {
       this.ended = true;
+      this.clearSilenceTimer();
       messages.push({ type: 'end' });
       this.onEvent('session_end', {
         turns: this.turns,
         reason: reply.endCall ? 'domain' : 'hard_turn_limit',
       });
+    } else if (token !== '' && ARMS_SILENCE_BACKSTOP.has(reply.closing)) {
+      this.armSilenceBackstop(turn, token);
     }
 
     return messages;
+  }
+
+  /**
+   * After a sign-off: wait for the line to be said, then `SILENCE_PROMPT_MS` of caller
+   * silence, then ask whether they are still there; then that line's own length plus
+   * `SILENCE_HANGUP_MS`, then end the call. Six seconds of silence at least, never less,
+   * before anything hangs up.
+   */
+  private armSilenceBackstop(turn: number, spoken: string): void {
+    const send = this.send;
+    if (!send || this.stillThereToken === '' || this.disposed) return;
+
+    this.clearSilenceTimer();
+    const promptAfterMs = estimatedSpeechMs(spoken) + SILENCE_PROMPT_MS;
+    this.onEvent('silence_armed', { turn, promptAfterMs });
+
+    this.silenceTimer = setTimeout(() => {
+      this.silenceTimer = null;
+      if (this.ended || this.disposed) return;
+
+      send([{ type: 'text', token: this.stillThereToken, last: true }]);
+      const hangupAfterMs = estimatedSpeechMs(this.stillThereToken) + SILENCE_HANGUP_MS;
+      this.onEvent('silence_prompt', { turn, hangupAfterMs });
+
+      this.silenceTimer = setTimeout(() => {
+        this.silenceTimer = null;
+        if (this.ended || this.disposed) return;
+
+        this.ended = true;
+        send([{ type: 'end' }]);
+        this.onEvent('session_end', { turns: this.turns, reason: 'silence' });
+      }, hangupAfterMs);
+    }, promptAfterMs);
+  }
+
+  private cancelSilenceBackstop(byFrame: string): void {
+    if (this.silenceTimer === null) return;
+    this.clearSilenceTimer();
+    this.onEvent('silence_cancelled', { by: byFrame });
+  }
+
+  private clearSilenceTimer(): void {
+    if (this.silenceTimer !== null) clearTimeout(this.silenceTimer);
+    this.silenceTimer = null;
   }
 }

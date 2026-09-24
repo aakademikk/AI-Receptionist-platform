@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   RelaySession,
+  SILENCE_HANGUP_MS,
+  SILENCE_PROMPT_MS,
+  estimatedSpeechMs,
   parseFrame,
   sanitiseForSpeech,
   type InboundFrame,
@@ -82,6 +85,26 @@ const textOf = (frames: OutboundFrame[]): string => {
   const text = frames.find((frame) => frame.type === 'text');
   return text?.type === 'text' ? text.token : '';
 };
+
+const STILL_THERE = 'Are you still there?';
+
+/**
+ * A session with the silence backstop switched on, and a record of the frames it sent
+ * unprompted — the ones no `handle` call returned.
+ */
+function backstopSession(reply: RelayReplyFn) {
+  const sent: OutboundFrame[] = [];
+  const events: Array<{ event: string; fields: Record<string, unknown> }> = [];
+  const session = new RelaySession({
+    reply,
+    onEvent: (event, fields) => events.push({ event, fields }),
+    send: (frames) => sent.push(...frames),
+    stillThereLine: STILL_THERE,
+  });
+  return { session, events, names: () => events.map((entry) => entry.event), sent };
+}
+
+const SIGN_OFF = 'No problem at all. Have a good evening.';
 
 describe('parseFrame', () => {
   it('parses a well-formed frame', () => {
@@ -408,6 +431,205 @@ describe('RelaySession', () => {
       await third;
 
       assert.equal(requests[2]!.anythingElseAsked, false);
+    });
+  });
+
+  describe('silence backstop', () => {
+    const promptAt = estimatedSpeechMs(SIGN_OFF) + SILENCE_PROMPT_MS;
+    const hangupAfter = estimatedSpeechMs(STILL_THERE) + SILENCE_HANGUP_MS;
+
+    it('asks "are you still there?" after a sign-off and 3 s of silence (check 3)', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, names, sent } = backstopSession(async () => ({
+        speak: SIGN_OFF,
+        endCall: false,
+        closing: 'wrapped_up',
+      }));
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('sorry, wrong number'));
+
+      // Nothing while she is still saying it, or in the 3 s after.
+      t.mock.timers.tick(promptAt - 1);
+      assert.deepEqual(sent, []);
+
+      t.mock.timers.tick(1);
+      assert.deepEqual(sent, [{ type: 'text', token: STILL_THERE, last: true }]);
+      assert.ok(names().includes('silence_prompt'));
+      assert.equal(session.isEnded, false);
+    });
+
+    it('is armed by "anything else?" too', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const line = 'Is there anything else I can help you with?';
+      const { session, sent } = backstopSession(async () => ({
+        speak: line,
+        endCall: false,
+        closing: 'asked_anything_else',
+      }));
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt("that's all, bye"));
+
+      t.mock.timers.tick(estimatedSpeechMs(line) + SILENCE_PROMPT_MS);
+      assert.deepEqual(sent, [{ type: 'text', token: STILL_THERE, last: true }]);
+    });
+
+    it('ends the call after 3 s more of silence (check 4)', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, events, names, sent } = backstopSession(async () => ({
+        speak: SIGN_OFF,
+        endCall: false,
+        closing: 'wrapped_up',
+      }));
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('sorry, wrong number'));
+
+      t.mock.timers.tick(promptAt);
+      assert.equal(sent.length, 1);
+
+      t.mock.timers.tick(hangupAfter - 1);
+      assert.equal(sent.length, 1, 'nothing hangs up before the second window has run');
+
+      t.mock.timers.tick(1);
+      assert.deepEqual(sent.at(-1), { type: 'end' });
+      assert.equal(session.isEnded, true);
+      assert.equal(names().at(-1), 'session_end');
+      assert.equal(events.at(-1)!.fields.reason, 'silence');
+
+      // And a late frame cannot restart it.
+      assert.deepEqual(await session.handle(finalPrompt('hello?')), []);
+    });
+
+    it('never runs after an ordinary turn, however long the caller pauses (check 5)', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      for (const closing of ['none', undefined] as const) {
+        const { session, sent, names } = backstopSession(async () => ({
+          speak: 'Let me just check that for you. What is the postcode',
+          endCall: false,
+          closing,
+        }));
+
+        await session.handle(SETUP);
+        await session.handle(finalPrompt('I need a boiler service'));
+
+        t.mock.timers.tick(10_000);
+        assert.deepEqual(sent, [], `closing: ${String(closing)}`);
+        assert.equal(session.isEnded, false);
+        assert.equal(names().includes('silence_armed'), false);
+      }
+    });
+
+    it('is cancelled by partial speech inside the first window (check 6)', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, sent, names } = backstopSession(async () => ({
+        speak: SIGN_OFF,
+        endCall: false,
+        closing: 'wrapped_up',
+      }));
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('sorry, wrong number'));
+
+      t.mock.timers.tick(promptAt - 500);
+      await session.handle({ type: 'prompt', voicePrompt: 'oh actually', last: false });
+
+      t.mock.timers.tick(20_000);
+      assert.deepEqual(sent, []);
+      assert.equal(session.isEnded, false);
+      assert.ok(names().includes('silence_cancelled'));
+    });
+
+    it('is cancelled by partial speech inside the second window (check 6)', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, sent } = backstopSession(async () => ({
+        speak: SIGN_OFF,
+        endCall: false,
+        closing: 'wrapped_up',
+      }));
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('sorry, wrong number'));
+
+      t.mock.timers.tick(promptAt);
+      assert.equal(sent.length, 1, 'the still-there line went out');
+
+      t.mock.timers.tick(hangupAfter - 500);
+      await session.handle({ type: 'prompt', voicePrompt: 'yes sorry I', last: false });
+
+      t.mock.timers.tick(20_000);
+      assert.equal(sent.length, 1, 'no end frame after the caller spoke');
+      assert.equal(sent.some((frame) => frame.type === 'end'), false);
+      assert.equal(session.isEnded, false);
+    });
+
+    it('is cancelled by a barge-in and by a keypress', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      for (const frame of [
+        { type: 'interrupt', utteranceUntilInterrupt: 'Have a', durationUntilInterruptMs: 500 },
+        { type: 'dtmf', digit: '1' },
+      ]) {
+        const { session, sent } = backstopSession(async () => ({
+          speak: SIGN_OFF,
+          endCall: false,
+          closing: 'wrapped_up',
+        }));
+
+        await session.handle(SETUP);
+        await session.handle(finalPrompt('sorry, wrong number'));
+        await session.handle(frame);
+
+        t.mock.timers.tick(20_000);
+        assert.deepEqual(sent, [], frame.type);
+      }
+    });
+
+    it('schedules nothing when the reply already ends the call', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, sent, names } = backstopSession(async () => ({
+        speak: 'No problem. Thanks for calling, bye for now.',
+        endCall: true,
+        closing: 'wrapped_up',
+      }));
+
+      await session.handle(SETUP);
+      const out = await session.handle(finalPrompt('no thanks'));
+      assert.deepEqual(out.at(-1), { type: 'end' });
+
+      t.mock.timers.tick(20_000);
+      assert.deepEqual(sent, [], 'the end went out with the reply; nothing follows it');
+      assert.equal(names().includes('silence_armed'), false);
+    });
+
+    it('fires nothing after dispose()', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, sent } = backstopSession(async () => ({
+        speak: SIGN_OFF,
+        endCall: false,
+        closing: 'wrapped_up',
+      }));
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('sorry, wrong number'));
+      session.dispose();
+
+      t.mock.timers.tick(20_000);
+      assert.deepEqual(sent, []);
+    });
+
+    it('stays off when no send function or still-there line was given', async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const { session, names } = sessionWithLog({
+        reply: async () => ({ speak: SIGN_OFF, endCall: false, closing: 'wrapped_up' }),
+      });
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('sorry, wrong number'));
+
+      t.mock.timers.tick(20_000);
+      assert.equal(names().includes('silence_armed'), false);
+      assert.equal(session.isEnded, false);
     });
   });
 

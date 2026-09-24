@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 
-import { replyToCaller } from '@atwood/core/domain';
+import { STILL_THERE_LINE, replyToCaller } from '@atwood/core/domain';
 import { serverEnv } from '@atwood/core/env';
 import { validateTwilioSignature } from '@atwood/core/integrations/twilio';
 import { logger } from '@atwood/core/utils';
@@ -117,6 +117,12 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 sockets.on('connection', (ws: WebSocket) => {
+  const send = (outbound: OutboundFrame[]): void => {
+    for (const message of outbound) {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
+    }
+  };
+
   const session = new RelaySession({
     // A backstop, not the product's limit — the tenant's `ai_max_turns` is that, and the
     // domain enforces it by asking for the call to end. See `RelaySessionOptions`.
@@ -128,13 +134,11 @@ sockets.on('connection', (ws: WebSocket) => {
       // produced. A voice call leaves no transcript unless we write one down.
       logger.info('Relay call event', { event, ...fields });
     },
+    // The silence backstop speaks unprompted, so it needs the socket's send directly, and
+    // its one line comes from core with the rest of the call's copy.
+    send,
+    stillThereLine: STILL_THERE_LINE,
   });
-
-  const send = (outbound: OutboundFrame[]): void => {
-    for (const message of outbound) {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message));
-    }
-  };
 
   ws.on('message', (data) => {
     const raw = data.toString('utf8');
@@ -175,6 +179,7 @@ sockets.on('connection', (ws: WebSocket) => {
   });
 
   ws.on('close', (code: number, reason: Buffer) => {
+    session.dispose();
     /*
      * 1007 is Twilio's "too many consecutive malformed messages" and 1000 is an ordinary
      * end. Logging the reason matters because an unexpected close is not retried by
