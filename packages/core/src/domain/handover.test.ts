@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { detectHandover, shouldIncrementConfusion } from './handover.ts';
+import {
+  detectHandover,
+  needsDetailCapture,
+  renderCaptureMessage,
+  shouldIncrementConfusion,
+} from './handover.ts';
 import type { BusinessContext, ConversationMemory } from '../types/domain.ts';
 
 /**
@@ -117,9 +122,10 @@ describe('detectHandover — emergencies', () => {
 describe('detectHandover — requests for a person', () => {
   const messages = [
     'Can I speak to a human please',
-    'I want to talk to someone',
+    'I want to speak to a person',
     'Is this a bot?',
     'Put me through to a manager',
+    'Transfer me to someone in charge',
     'Call me back now',
   ];
 
@@ -134,6 +140,95 @@ describe('detectHandover — requests for a person', () => {
       assert.equal(decision.reason, 'customer_request');
     });
   }
+
+  /*
+   * The regression this file did not have, and the reason `someone` was dropped from the
+   * target list.
+   *
+   * On 2026-09-17 a caller rang to ask about rewiring a house and said they would like to
+   * talk to someone, or get a price. The word "someone" matched, the call was escalated
+   * before a single detail was taken, and the line was closed with a promise that nobody
+   * could keep. The sentence is a buying signal, not a request to be let off the bot.
+   *
+   * "Talk to someone" is now escalated only when an escalation verb carries it ("put me
+   * through to someone", covered above). That is the deliberate trade: a caller who says
+   * *only* "I want to talk to someone" is not escalated on this line, and is instead
+   * caught by the turn budget or the confusion ladder. Recall was spent on purpose here,
+   * because the cost of the false positive was a lost customer with nobody told.
+   */
+  const notEscalated = [
+    "I've got a house that needs rewiring, could I talk to someone or get a price?",
+    'I want to talk to someone about a quote',
+    'Could I speak to somebody about pricing',
+  ];
+
+  for (const message of notEscalated) {
+    it(`does not escalate on "${message}"`, () => {
+      const decision = detectHandover({
+        context: makeContext(),
+        memory: makeMemory(),
+        inboundText: message,
+      });
+      assert.equal(decision.shouldHandover, false, `"${message}" is an enquiry, not an escalation`);
+    });
+  }
+
+  /*
+   * The same sentence, against the keyword list the live tenant actually carries.
+   *
+   * Tightening the patterns above was not enough on its own. `handover_keywords` shipped a
+   * schema default containing the literal "talk to someone", the VOLTA row had inherited
+   * it, and rule 4 matches a multi-word keyword as a plain substring — so the identical
+   * sentence escalated down a second path that no amount of pattern work would close. Both
+   * the default in `0003_profile_and_knowledge.sql` and the live row were changed with it.
+   *
+   * Pinned here as a list rather than read from the database so the test says what the
+   * tenant's keywords should be, not merely what they are: if someone re-adds the phrase
+   * to the default, this fails on the next run rather than on the next phone call.
+   */
+  it('does not escalate Colin\'s sentence even via the tenant keyword path', () => {
+    const decision = detectHandover({
+      context: makeContext({
+        handover_keywords: [
+          'speak to a human',
+          'real person',
+          'manager',
+          'complaint',
+          'urgent',
+          'emergency',
+          'solicitor',
+          'lawyer',
+        ],
+      }),
+      memory: makeMemory(),
+      inboundText:
+        "I've got a house that needs rewiring, could I talk to someone or get a price for that?",
+    });
+    assert.equal(decision.shouldHandover, false);
+  });
+});
+
+describe('detail capture before a handover promise', () => {
+  it('asks for details when nothing is known about the caller', () => {
+    assert.equal(needsDetailCapture(makeMemory({ customer_name: null })), true);
+    assert.equal(needsDetailCapture(makeMemory({ customer_name: '   ' })), true);
+  });
+
+  it('does not ask when the name is already known', () => {
+    assert.equal(needsDetailCapture(makeMemory({ customer_name: 'Priya Shah' })), false);
+  });
+
+  it('promises a callback and asks, rather than saying goodbye', () => {
+    const line = renderCaptureMessage(makeContext());
+    assert.match(line, /ring you back on this number/i);
+    assert.match(line, /your name/i);
+  });
+
+  it('names the business rather than the assistant as the caller of the callback', () => {
+    const context = makeContext();
+    context.profile.trading_name = 'Volta Electrical';
+    assert.match(renderCaptureMessage(context), /Volta Electrical/);
+  });
 });
 
 describe('detectHandover — complaints', () => {

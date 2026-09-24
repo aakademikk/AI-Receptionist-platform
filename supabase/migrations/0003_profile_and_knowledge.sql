@@ -108,8 +108,11 @@ create table public.business_settings (
 
   -- === Escalation / handover ===
   handover_enabled       boolean not null default true,
+  -- 'talk to someone' was removed 2026-09-17: it matched "I'd like to talk to someone
+  -- or maybe get a rough price" and escalated a live call with no details taken. See
+  -- HUMAN_REQUEST_PATTERNS in packages/core/src/domain/handover.ts for the full reason.
   handover_keywords      text[] not null default array[
-                           'speak to a human','real person','talk to someone','manager',
+                           'speak to a human','real person','manager',
                            'complaint','urgent','emergency','solicitor','lawyer'
                          ]::text[],
   handover_on_emergency  boolean not null default true,

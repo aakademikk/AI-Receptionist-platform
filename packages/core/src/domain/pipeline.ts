@@ -2,7 +2,13 @@ import { getAdminClient } from '../supabase/admin.ts';
 import type { BusinessContext, CommsChannel, HandoverReason } from '../types/domain.ts';
 import { logger, newTraceId } from '../utils/logger.ts';
 import { loadBusinessContext, loadConversationMemory, needsSummarisation } from './context.ts';
-import { detectHandover, renderHandoverMessage, shouldIncrementConfusion } from './handover.ts';
+import {
+  detectHandover,
+  needsDetailCapture,
+  renderCaptureMessage,
+  renderHandoverMessage,
+  shouldIncrementConfusion,
+} from './handover.ts';
 import { extractLead, leadNotificationEvents } from './lead.ts';
 import { composeHandoverBody, enqueueNotification } from './notify.ts';
 import { generateReply, summariseConversation } from './reply.ts';
@@ -187,6 +193,16 @@ export interface HandleInboundMessageResult {
     aiLogId: string | null;
   } | null;
   handover: { reason: HandoverReason; note: string | null } | null;
+  /**
+   * True when the assistant has handed over on a **call** but has no details yet, and has
+   * asked the caller for them instead of saying goodbye.
+   *
+   * A call is the only channel where this is both necessary and possible: necessary
+   * because the owner's alert otherwise carries a phone number and nothing else, and
+   * possible because the line is still open and `voice.ts` decides when it closes.
+   * `endCall` must not be true while this is.
+   */
+  capturePending: boolean;
   lead: { leadId: string | null; score: number } | null;
 }
 
@@ -270,7 +286,7 @@ export async function handleInboundMessage(
 
   if (!appended.was_created) {
     log.info('Duplicate inbound webhook; not replying again');
-    return { ...base, reply: null, handover: null, lead: null };
+    return { ...base, reply: null, handover: null, capturePending: false, lead: null };
   }
 
   const [context, memory] = await Promise.all([
@@ -280,6 +296,29 @@ export async function handleInboundMessage(
 
   const fromNumber =
     context.phone_numbers.find((n) => n.channels.includes(channel))?.e164 ?? input.toNumber;
+
+  /*
+   * The transcript loaded from the database predates this message, so append it once here
+   * for everything downstream that reasons over the conversation.
+   *
+   * Built before the escalation check rather than at the point of generation because two
+   * callers need it: `generateReply`, and the extraction that runs *inside* a handover.
+   * The handover path used to extract from the transcript without the message that
+   * triggered the handover, which is the one message an owner most wants summarised.
+   */
+  const memoryWithInbound = {
+    ...memory,
+    transcript: [
+      ...memory.transcript,
+      {
+        id: appended.message_id,
+        direction: 'inbound' as const,
+        sender: 'customer' as const,
+        body: input.body,
+        created_at: new Date().toISOString(),
+      },
+    ],
+  };
 
   // --- 3. Escalation check --------------------------------------------------
   const decision = detectHandover({ context, memory, inboundText: input.body });
@@ -317,7 +356,7 @@ export async function handleInboundMessage(
      * cannot drift into doing different things.
      */
     const finishHandover = async () => {
-      const lead = await extractLead({ context, memory, traceId }).catch((error) => {
+      const lead = await extractLead({ context, memory: memoryWithInbound, traceId }).catch((error) => {
         log.warn('Extraction failed during handover', { error: String(error) });
         return null;
       });
@@ -337,9 +376,32 @@ export async function handleInboundMessage(
       return lead;
     };
 
+    /*
+     * On a call, ask before saying goodbye.
+     *
+     * `renderHandoverMessage` promises the owner will be in touch, which is only worth
+     * saying once there is something to be in touch *about*. Spoken as the first line of
+     * a handover it is a promise the owner cannot keep, and on 2026-09-17 it was made to a
+     * caller who had given nothing but a phone number.
+     *
+     * Why the line is asked *after* `request_handover` rather than before: that RPC is
+     * what sets `status = 'waiting_for_human'` and `ai_enabled = false`. So the caller's
+     * answer arrives with the assistant already muted, is recorded like any other turn,
+     * raises no second model call, and the next turn closes the line. The capture is the
+     * mute working in our favour instead of against the caller.
+     *
+     * Voice only. On SMS the handover message is the right and final word — the owner
+     * picks the thread up from there, and a question nobody is listening for would just
+     * be an unanswered text.
+     */
+    const capturePending =
+      channel === 'voice' && decision.notifyCustomer && needsDetailCapture(memory);
+
     const handoverReply: HandleInboundMessageResult['reply'] = decision.notifyCustomer
       ? {
-          body: renderHandoverMessage(context, reason),
+          body: capturePending
+            ? renderCaptureMessage(context)
+            : renderHandoverMessage(context, reason),
           toNumber: input.fromNumber,
           fromNumber,
           channel,
@@ -366,6 +428,7 @@ export async function handleInboundMessage(
         ...base,
         reply: handoverReply,
         handover: { reason, note },
+        capturePending,
         lead: null,
       };
     }
@@ -376,6 +439,7 @@ export async function handleInboundMessage(
       ...base,
       reply: handoverReply,
       handover: { reason, note },
+      capturePending,
       lead: lead ? { leadId: lead.leadId, score: lead.score } : null,
     };
   }
@@ -383,6 +447,31 @@ export async function handleInboundMessage(
   // The AI may be muted because a human took the thread over.
   if (!memory.ai_enabled || !context.settings.ai_enabled) {
     log.info('AI is muted for this conversation; recorded the message only');
+
+    /*
+     * The answer to a capture we asked for on the previous turn.
+     *
+     * `request_handover` mutes the assistant, so the details a caller gives after being
+     * asked for them arrive here and nowhere else. Unhandled, they would sit on the
+     * transcript and never reach the lead — leaving the owner with the alert that says a
+     * colleague will ring back, and a phone number but nothing to ring back about. That is
+     * the original fault, one turn later.
+     *
+     * Voice only. On SMS a muted thread belongs to the person reading it, and extracting
+     * there would spend a model call on every message of a conversation the assistant was
+     * never asked about.
+     *
+     * Fired without awaiting: the caller is holding the phone waiting to be told the call
+     * is ending, and a model round trip is not worth that silence. The relay is a
+     * long-running service, so the work outlives the response — the same reasoning as
+     * `deferExtraction`, and bounded to one turn here because this turn returns no reply
+     * and `voice.ts` closes the line.
+     */
+    if (channel === 'voice' && memory.status === 'waiting_for_human') {
+      void extractLead({ context, memory: memoryWithInbound, traceId }).catch((error) => {
+        log.warn('Extraction of captured handover details failed', { error: String(error) });
+      });
+    }
 
     await enqueueNotification({
       businessId: resolved.business_id,
@@ -394,25 +483,10 @@ export async function handleInboundMessage(
       dedupeKey: `new_message:${appended.message_id}`,
     });
 
-    return { ...base, reply: null, handover: null, lead: null };
+    return { ...base, reply: null, handover: null, capturePending: false, lead: null };
   }
 
   // --- 4. Generate the reply -----------------------------------------------
-  // The transcript loaded above predates this message, so append it for the model.
-  const memoryWithInbound = {
-    ...memory,
-    transcript: [
-      ...memory.transcript,
-      {
-        id: appended.message_id,
-        direction: 'inbound' as const,
-        sender: 'customer' as const,
-        body: input.body,
-        created_at: new Date().toISOString(),
-      },
-    ],
-  };
-
   const generated = await generateReply({ context, memory: memoryWithInbound, traceId });
 
   // A provider refusal is not an error — it means a person is needed.
@@ -446,6 +520,7 @@ export async function handleInboundMessage(
         aiLogId: generated.aiLogId,
       },
       handover: { reason: 'ai_error', note: 'Provider refusal' },
+      capturePending: false,
       lead: null,
     };
   }
@@ -515,7 +590,7 @@ export async function handleInboundMessage(
       log.warn('Extraction after the reply failed', { error: String(error) });
     });
 
-    return { ...base, reply, handover: null, lead: null };
+    return { ...base, reply, handover: null, capturePending: false, lead: null };
   }
 
   const lead = await finishReply();
@@ -524,6 +599,7 @@ export async function handleInboundMessage(
     ...base,
     reply,
     handover: null,
+    capturePending: false,
     lead: lead ? { leadId: lead.leadId, score: lead.score } : null,
   };
 }

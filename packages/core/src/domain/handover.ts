@@ -60,8 +60,22 @@ const EMERGENCY_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bceiling\s+(?:collapsed|falling|coming\s+down)\b/i, label: 'structural failure' },
 ];
 
+/**
+ * Deliberately excludes a bare "talk to someone" / "speak to somebody".
+ *
+ * That phrase is how people ask for a *price*, not how they ask to be let off a bot.
+ * "I'd like to talk to someone or maybe get a rough price" is a buying signal, and on
+ * 2026-09-17 it escalated a live call and hung up on the caller mid-enquiry with no
+ * details taken. Escalation needs either an escalation **verb** ("put me through",
+ * "transfer me") or a target that means *not a machine* — human, person, manager.
+ * "Someone" is ordinary English for "anyone at all", so it cannot carry the decision.
+ *
+ * ⚠ The same phrase also sits in `business_settings.handover_keywords`, both as a schema
+ * default and on the live tenant. Tightening only this list leaves the rule 4 keyword
+ * match to fire on the identical sentence — fix both or neither.
+ */
 const HUMAN_REQUEST_PATTERNS: RegExp[] = [
-  /\b(?:speak|talk|spoke)\s+(?:to|with)\s+(?:a\s+)?(?:human|person|real\s+person|someone|somebody|manager|supervisor|advisor)\b/i,
+  /\b(?:speak|talk|spoke)\s+(?:to|with)\s+(?:a\s+|the\s+)?(?:human|person|real\s+person|manager|supervisor|advisor)\b/i,
   /\b(?:is\s+this|are\s+you)\s+(?:a\s+)?(?:bot|robot|ai|computer|machine|automated)\b/i,
   /\b(?:stop|no more)\s+(?:the\s+)?(?:bot|ai|automated|messages)\b/i,
   /\bcall\s+me\s+(?:back\s+)?(?:now|please|immediately|asap|right\s+away)\b/i,
@@ -273,4 +287,34 @@ export function renderHandoverMessage(
     default:
       return `Thanks — I'm passing this to a colleague at ${businessName} who'll pick it up with you shortly.`;
   }
+}
+
+/**
+ * Whether a handover has anything behind it yet.
+ *
+ * A caller's number arrives with the call, so on a phone line there is always somewhere
+ * to ring back. What is missing on the calls this guards is *who* is calling and what
+ * they want, and the owner's alert is worth far less without it. `customer_name` is the
+ * signal because it is the one detail the extractor either has or has not got.
+ */
+export function needsDetailCapture(memory: ConversationMemory): boolean {
+  return memory.customer_name === null || memory.customer_name.trim() === '';
+}
+
+/**
+ * The line spoken on a **call** when we are handing over but have nothing to hand over.
+ *
+ * The promise in `renderHandoverMessage` is a fine sentence when there is a summary
+ * behind it. Spoken before the caller has given their name, it is a promise nobody can
+ * keep: the owner is notified 40 seconds later holding a phone number and no idea what
+ * the call was about. That is what happened on 2026-09-17.
+ *
+ * So on a call the order is inverted: ask first, and let the promise follow. The pipeline
+ * mutes the assistant when the handover is requested, so the caller's answer is recorded
+ * and the *next* turn closes the line. "On this number" is the honest half of the
+ * promise, because caller ID is real and the owner's alert already carries it.
+ */
+export function renderCaptureMessage(context: BusinessContext): string {
+  const businessName = context.profile.trading_name ?? context.name;
+  return `Of course. I'll ask a colleague at ${businessName} to ring you back on this number. Before I do, can I take your name, and a rough idea of what you need?`;
 }

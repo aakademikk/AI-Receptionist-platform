@@ -140,6 +140,11 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
      * that correctly produces no outbound message and nothing looks wrong. On a call it
      * produces dead air, so the caller is told what is happening and the line closes.
      *
+     * This is also the turn that ends a capture: the caller has just answered the question
+     * the handover asked them, so the line has done its job and "I'll make sure a colleague
+     * picks it up with you" is now something we can stand behind. The details they gave are
+     * extracted by the pipeline on this same turn.
+     *
      * No second notification is raised: the pipeline has already enqueued one for the
      * owner, and this turn adds nothing they do not have.
      */
@@ -166,8 +171,15 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
      * truthfully offer: the caller has been told a colleague will be in touch, and
      * exactly one of those two things is happening on this line. It is also where the
      * turn budget lands — a conversation out of turns is out of assistant.
+     *
+     * Except when there is something further to offer, which is the one case a handover
+     * was ever wrong about: `capturePending` means the caller has been asked for their
+     * details rather than told goodbye, so the line stays open for the answer. That answer
+     * arrives on a muted conversation, so the `!result.reply` branch above closes the call
+     * on the following turn — the capture does not need a second branch here, it just
+     * needs this one not to hang up first.
      */
-    endCall: base.handover !== null,
+    endCall: base.handover !== null && !result.capturePending,
   };
 }
 
