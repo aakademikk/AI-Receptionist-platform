@@ -61,6 +61,7 @@ export {
   replyToCaller,
   type VoiceTurnInput,
   type VoiceTurnResult,
+  type VoiceTurnClosing,
 } from './voice.ts';
 
 export {

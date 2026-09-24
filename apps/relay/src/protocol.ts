@@ -110,6 +110,8 @@ export interface RelayReplyRequest {
   heard: string;
   /** 1-based, counted within this call. */
   turn: number;
+  /** True once "anything else?" has been asked and heard on this call. */
+  anythingElseAsked?: boolean;
 }
 
 export interface RelayReply {
@@ -117,6 +119,12 @@ export interface RelayReply {
   speak: string;
   /** True when the call should end once this has been spoken. */
   endCall: boolean;
+  /**
+   * What kind of turn the domain produced, for the end of the call: it asked "anything
+   * else?", it signed off, or neither. Optional so a reply function that knows nothing
+   * about closing still fits.
+   */
+  closing?: 'asked_anything_else' | 'wrapped_up' | 'none';
 }
 
 export type RelayReplyFn = (request: RelayReplyRequest) => Promise<RelayReply>;

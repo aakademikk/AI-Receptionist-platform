@@ -2,6 +2,7 @@ import { getAdminClient } from '../supabase/admin.ts';
 import type { HandoverReason } from '../types/domain.ts';
 import { logger, newTraceId } from '../utils/logger.ts';
 import { cleanForSpeech } from '../utils/speech.ts';
+import { ANYTHING_ELSE_LINE, GOODBYE_LINE, decideCallerClosing, isWrapUpLine } from './closing.ts';
 import { handleInboundMessage, type HandleInboundMessageResult } from './pipeline.ts';
 
 /**
@@ -64,8 +65,24 @@ export interface VoiceTurnInput {
   heard: string;
   /** 1-based, counted within this call. */
   turn: number;
+  /**
+   * True once "anything else?" has been asked and heard on this call. The relay keeps it,
+   * because the relay is what outlives a turn; see `closing.ts` for what it changes.
+   */
+  anythingElseAsked?: boolean;
   traceId?: string;
 }
+
+/**
+ * What kind of turn this was, as far as the end of the call is concerned.
+ *
+ *  * `asked_anything_else` — the assistant asked "anything else?". The relay remembers
+ *    it, so the question is never asked twice, and arms its silence backstop.
+ *  * `wrapped_up` — the assistant signed off and the call is still open. The relay arms
+ *    its silence backstop.
+ *  * `none` — anything else, including a turn that ends the call.
+ */
+export type VoiceTurnClosing = 'asked_anything_else' | 'wrapped_up' | 'none';
 
 export interface VoiceTurnResult {
   /** What to say. Never empty — a silent turn is a dropped call to the caller's ear. */
@@ -77,10 +94,27 @@ export interface VoiceTurnResult {
   businessId: string | null;
   conversationId: string | null;
   handover: HandoverReason | null;
+  closing: VoiceTurnClosing;
 }
 
 export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnResult> {
   const traceId = input.traceId ?? newTraceId();
+
+  /*
+   * Decided from the caller's words before the pipeline runs, because the closing lines
+   * replace the model call rather than follow it. The pipeline still records the turn and
+   * still runs the escalation check first, so a handover beats a closing line below.
+   */
+  const closingDecision = decideCallerClosing({
+    heard: input.heard,
+    anythingElseAsked: input.anythingElseAsked ?? false,
+  });
+  const cannedReply =
+    closingDecision === 'ask_anything_else'
+      ? ANYTHING_ELSE_LINE
+      : closingDecision === 'goodbye'
+        ? GOODBYE_LINE
+        : undefined;
 
   let result: HandleInboundMessageResult;
   try {
@@ -96,6 +130,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
        */
       providerMessageId: `${input.callSid}:${input.turn}`,
       deferExtraction: true,
+      cannedReply,
       traceId,
     });
   } catch (error) {
@@ -119,6 +154,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
       businessId: null,
       conversationId: null,
       handover: null,
+      closing: 'none',
     };
   }
 
@@ -131,7 +167,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
 
   if (!result.isNewMessage) {
     logger.warn('Duplicate voice turn', { traceId, callSid: input.callSid, turn: input.turn });
-    return { ...base, speak: DID_NOT_CATCH, endCall: false };
+    return { ...base, speak: DID_NOT_CATCH, endCall: false, closing: 'none' };
   }
 
   if (!result.reply) {
@@ -152,20 +188,45 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
       traceId,
       conversationId: result.conversationId,
     });
-    return { ...base, speak: CANNOT_TAKE_CALL, endCall: true };
+    return { ...base, speak: CANNOT_TAKE_CALL, endCall: true, closing: 'none' };
   }
 
   await recordAssistantTurn(result, traceId);
 
+  /*
+   * The last guard before text becomes audio. `generateReply` has already shaped this
+   * for speech, but the handover line and the refusal line did not go through it, and
+   * this is also the only place that can promise the caller hears no markdown even if
+   * a future branch forgets.
+   */
+  const speak = cleanForSpeech(result.reply.body) || CANNOT_TAKE_CALL;
+
+  if (base.handover === null) {
+    /*
+     * The closing lines, and only when no handover happened: a caller who says "bye" in
+     * the same breath as an emergency is handed over, and the handover's own rule below
+     * decides whether the line closes. That rule is also what keeps `endCall` false while
+     * `capturePending` is true, so nothing here can break it.
+     */
+    if (closingDecision === 'goodbye') {
+      // They have nothing else. Say goodbye and close the line, with no silence wait.
+      return { ...base, speak, endCall: true, closing: 'none' };
+    }
+    if (closingDecision === 'ask_anything_else') {
+      return { ...base, speak, endCall: false, closing: 'asked_anything_else' };
+    }
+    return {
+      ...base,
+      speak,
+      endCall: false,
+      closing: isWrapUpLine(speak) ? 'wrapped_up' : 'none',
+    };
+  }
+
   return {
     ...base,
-    /*
-     * The last guard before text becomes audio. `generateReply` has already shaped this
-     * for speech, but the handover line and the refusal line did not go through it, and
-     * this is also the only place that can promise the caller hears no markdown even if
-     * a future branch forgets.
-     */
-    speak: cleanForSpeech(result.reply.body) || CANNOT_TAKE_CALL,
+    speak,
+    closing: 'none',
     /*
      * Handing over ends the call, because there is nothing further the assistant can
      * truthfully offer: the caller has been told a colleague will be in touch, and

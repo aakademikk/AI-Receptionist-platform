@@ -173,6 +173,20 @@ export interface HandleInboundMessageInput {
    * drop the work silently.
    */
   deferExtraction?: boolean;
+  /**
+   * Say this instead of asking the model.
+   *
+   * Set by the voice path only, for the lines that end a call ("anything else?", the
+   * goodbye), which are fixed text and are said while the caller waits on the line — a
+   * model round trip to reproduce a known sentence is latency for nothing.
+   *
+   * It replaces step 4 and nothing else. The caller's turn is still recorded, a replay is
+   * still gated, and the escalation check still runs first, so a handover always wins
+   * over a closing line; a muted conversation still gets no reply. The line is still an
+   * `ai` turn, so it lands on the transcript like any other, and the extraction and
+   * notifications after it run as they would after a generated reply.
+   */
+  cannedReply?: string;
   traceId?: string;
 }
 
@@ -488,7 +502,10 @@ export async function handleInboundMessage(
   }
 
   // --- 4. Generate the reply -----------------------------------------------
-  const generated = await generateReply({ context, memory: memoryWithInbound, traceId });
+  const generated =
+    input.cannedReply !== undefined
+      ? { body: input.cannedReply, aiLogId: null, refused: null }
+      : await generateReply({ context, memory: memoryWithInbound, traceId });
 
   // A provider refusal is not an error — it means a person is needed.
   if (generated.refused) {
