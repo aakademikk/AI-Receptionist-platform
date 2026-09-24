@@ -177,6 +177,7 @@ describe('RelaySession', () => {
         fromNumber: '+447000000000',
         heard: 'hello',
         turn: 1,
+        anythingElseAsked: false,
       },
     ]);
   });
@@ -330,6 +331,84 @@ describe('RelaySession', () => {
     assert.equal(session.isEnded, true);
     assert.deepEqual(names().at(-1), 'session_end');
     assert.equal(events.at(-1)!.fields.reason, 'hard_turn_limit');
+  });
+
+  describe('remembering "anything else?"', () => {
+    const ASKED: RelayReply = {
+      speak: 'Is there anything else I can help you with?',
+      endCall: false,
+      closing: 'asked_anything_else',
+    };
+    const ORDINARY: RelayReply = { speak: 'Go on.', endCall: false, closing: 'none' };
+
+    it('is false on the first turn', async () => {
+      const { fn, requests } = recordingReply();
+      const { session } = sessionWithLog({ reply: fn });
+
+      await session.handle(SETUP);
+      await session.handle(finalPrompt('hello'));
+
+      assert.equal(requests[0]!.anythingElseAsked, false);
+    });
+
+    it('is true on the turn after the question was asked, and stays true', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const { session } = sessionWithLog({ reply: fn });
+      await session.handle(SETUP);
+
+      const first = session.handle(finalPrompt("that's all, bye"));
+      resolve(0, ASKED);
+      await first;
+
+      const second = session.handle(finalPrompt('actually, do you work weekends'));
+      resolve(1, ORDINARY);
+      await second;
+
+      const third = session.handle(finalPrompt('thanks'));
+      resolve(2, ORDINARY);
+      await third;
+
+      assert.deepEqual(
+        requests.map((request) => request.anythingElseAsked),
+        [false, true, true],
+      );
+    });
+
+    it('stays false when the asking reply was interrupted, because the caller never heard it', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const { session } = sessionWithLog({ reply: fn });
+      await session.handle(SETUP);
+
+      const first = session.handle(finalPrompt("that's all, bye"));
+      await session.handle({ type: 'interrupt', utteranceUntilInterrupt: 'oh wait', durationUntilInterruptMs: 300 });
+      resolve(0, ASKED);
+      assert.deepEqual(await first, []);
+
+      const second = session.handle(finalPrompt('one more thing'));
+      resolve(1, ORDINARY);
+      await second;
+
+      assert.equal(requests[1]!.anythingElseAsked, false);
+    });
+
+    it('stays false when the asking reply was superseded by a newer turn', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const { session } = sessionWithLog({ reply: fn });
+      await session.handle(SETUP);
+
+      const first = session.handle(finalPrompt("that's all, bye"));
+      const second = session.handle(finalPrompt('oh, and the boiler'));
+      resolve(0, ASKED);
+      assert.deepEqual(await first, []);
+      resolve(1, ORDINARY);
+      await second;
+
+      const third = session.handle(finalPrompt('ok'));
+      resolve(2, ORDINARY);
+      await third;
+
+      assert.equal(requests[2]!.anythingElseAsked, false);
+    });
   });
 
   it('does not throw on an unknown frame type', async () => {

@@ -176,6 +176,15 @@ export class RelaySession {
    */
   private pendingTurn = 0;
   private ended = false;
+  /**
+   * True once the caller has heard "anything else?" on this call.
+   *
+   * The domain decides the wording and the relay only remembers, because the relay is the
+   * one thing that lives as long as the call. Set once and never reset: the question is
+   * asked at most once per call. Set only when the asking reply is actually spoken — a
+   * superseded or interrupted reply was never heard, so it asked nothing.
+   */
+  private anythingElseAsked = false;
 
   constructor(options: RelaySessionOptions = {}) {
     this.maxTurns = options.maxTurns ?? 40;
@@ -299,6 +308,7 @@ export class RelaySession {
       fromNumber: this.call.from ?? '',
       heard: text,
       turn,
+      anythingElseAsked: this.anythingElseAsked,
     });
 
     if (this.pendingTurn !== turn) {
@@ -307,6 +317,8 @@ export class RelaySession {
       return [];
     }
     this.pendingTurn = 0;
+
+    if (reply.closing === 'asked_anything_else') this.anythingElseAsked = true;
 
     const messages: OutboundFrame[] = [];
     const token = sanitiseForSpeech(reply.speak);
