@@ -63,6 +63,17 @@ export {
   type VoiceTurnResult,
 } from './voice.ts';
 
+export {
+  isCallerClosing,
+  isDecliningMore,
+  decideCallerClosing,
+  isWrapUpLine,
+  ANYTHING_ELSE_LINE,
+  GOODBYE_LINE,
+  STILL_THERE_LINE,
+  type CallerClosingDecision,
+} from './closing.ts';
+
 export { runOnboarding, applyOnboarding } from './onboarding.ts';
 
 export {
