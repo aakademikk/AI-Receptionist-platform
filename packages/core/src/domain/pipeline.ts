@@ -12,6 +12,7 @@ import {
 import { extractLead, leadNotificationEvents } from './lead.ts';
 import { composeHandoverBody, enqueueNotification } from './notify.ts';
 import { generateReply, summariseConversation } from './reply.ts';
+import { sourceForChannel } from './source.ts';
 import { renderMissedCallSms } from '../prompts/receptionist.ts';
 import { publicEnv } from '../env.ts';
 
@@ -238,7 +239,7 @@ export async function handleInboundMessage(
     p_to_number: input.toNumber,
     p_from_number: input.fromNumber,
     p_channel: channel,
-    p_source: channel === 'whatsapp' ? 'whatsapp' : 'inbound_sms',
+    p_source: sourceForChannel(channel),
   });
 
   if (resolveError) throw new Error(`resolve_inbound failed: ${resolveError.message}`);
