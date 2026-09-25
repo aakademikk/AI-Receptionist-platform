@@ -188,16 +188,27 @@ export type CallerClosingDecision = 'ask_anything_else' | 'goodbye' | 'none';
  * What the caller's words mean for the end of the call.
  *
  *  * Not yet asked, and the caller is closing: ask "anything else?".
- *  * Already asked, and the caller declines or says goodbye again: say goodbye and hang up.
- *    Never a second "anything else?" — it is asked at most once per call.
+ *  * Asked on the turn just gone, and the caller declines or says goodbye: say goodbye and
+ *    hang up. A bare "no" counts only here, because only here is it an answer to "anything
+ *    else?".
+ *  * Asked earlier in the call, the caller raised something new, and now says goodbye:
+ *    say goodbye and hang up. Never a second "anything else?" — it is asked at most once.
+ *    A bare "no" at this point is an answer to whatever she asked last ("is it urgent?"),
+ *    so it is an ordinary turn.
  *  * Anything else: an ordinary turn.
  */
 export function decideCallerClosing(input: {
   heard: string;
+  /** "Anything else?" has been asked at some point on this call. */
   anythingElseAsked: boolean;
+  /** The reply the caller is answering was "anything else?" itself. */
+  anythingElseJustAsked: boolean;
 }): CallerClosingDecision {
-  if (input.anythingElseAsked) {
+  if (input.anythingElseAsked && input.anythingElseJustAsked) {
     return isDecliningMore(input.heard) ? 'goodbye' : 'none';
+  }
+  if (input.anythingElseAsked) {
+    return isCallerClosing(input.heard) ? 'goodbye' : 'none';
   }
   return isCallerClosing(input.heard) ? 'ask_anything_else' : 'none';
 }

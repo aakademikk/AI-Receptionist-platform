@@ -112,6 +112,8 @@ export interface RelayReplyRequest {
   turn: number;
   /** True once "anything else?" has been asked and heard on this call. */
   anythingElseAsked?: boolean;
+  /** True when the last reply the caller heard was "anything else?" itself. */
+  anythingElseJustAsked?: boolean;
 }
 
 export interface RelayReply {
@@ -232,6 +234,11 @@ export class RelaySession {
    * superseded or interrupted reply was never heard, so it asked nothing.
    */
   private anythingElseAsked = false;
+  /**
+   * True when the last reply actually spoken was "anything else?". A bare "no" ends the
+   * call only as the answer to that reply; asked to any later question, it is just a no.
+   */
+  private anythingElseJustAsked = false;
 
   private readonly send: ((frames: OutboundFrame[]) => void) | null;
   private readonly stillThereToken: string;
@@ -387,6 +394,7 @@ export class RelaySession {
       heard: text,
       turn,
       anythingElseAsked: this.anythingElseAsked,
+      anythingElseJustAsked: this.anythingElseJustAsked,
     });
 
     if (this.pendingTurn !== turn) {
@@ -397,6 +405,7 @@ export class RelaySession {
     this.pendingTurn = 0;
 
     if (reply.closing === 'asked_anything_else') this.anythingElseAsked = true;
+    this.anythingElseJustAsked = reply.closing === 'asked_anything_else';
 
     const messages: OutboundFrame[] = [];
     const token = sanitiseForSpeech(reply.speak);

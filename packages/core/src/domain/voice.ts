@@ -70,6 +70,11 @@ export interface VoiceTurnInput {
    * because the relay is what outlives a turn; see `closing.ts` for what it changes.
    */
   anythingElseAsked?: boolean;
+  /**
+   * True when the reply the caller is now answering was "anything else?" itself. Only then
+   * is a bare "no" a request to end the call; see `decideCallerClosing`.
+   */
+  anythingElseJustAsked?: boolean;
   traceId?: string;
 }
 
@@ -108,6 +113,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
   const closingDecision = decideCallerClosing({
     heard: input.heard,
     anythingElseAsked: input.anythingElseAsked ?? false,
+    anythingElseJustAsked: input.anythingElseJustAsked ?? false,
   });
   const cannedReply =
     closingDecision === 'ask_anything_else'

@@ -100,35 +100,53 @@ describe('isDecliningMore', () => {
 
 describe('decideCallerClosing', () => {
   it('asks "anything else?" when the caller first says goodbye (check 1)', () => {
-    assert.equal(decideCallerClosing({ heard: "That's all, bye", anythingElseAsked: false }), 'ask_anything_else');
-    assert.equal(decideCallerClosing({ heard: 'Cheers, bye.', anythingElseAsked: false }), 'ask_anything_else');
+    assert.equal(decideCallerClosing({ heard: "That's all, bye", anythingElseAsked: false, anythingElseJustAsked: false }), 'ask_anything_else');
+    assert.equal(decideCallerClosing({ heard: 'Cheers, bye.', anythingElseAsked: false, anythingElseJustAsked: false }), 'ask_anything_else');
   });
 
   it('says goodbye when the caller answers "no thanks" after the ask (check 2)', () => {
-    assert.equal(decideCallerClosing({ heard: 'No thanks', anythingElseAsked: true }), 'goodbye');
-    assert.equal(decideCallerClosing({ heard: 'No', anythingElseAsked: true }), 'goodbye');
+    assert.equal(decideCallerClosing({ heard: 'No thanks', anythingElseAsked: true, anythingElseJustAsked: true }), 'goodbye');
+    assert.equal(decideCallerClosing({ heard: 'No', anythingElseAsked: true, anythingElseJustAsked: true }), 'goodbye');
   });
 
   it('says goodbye, never a second ask, on a second "bye" (check 2)', () => {
-    assert.equal(decideCallerClosing({ heard: 'Bye', anythingElseAsked: true }), 'goodbye');
-    assert.equal(decideCallerClosing({ heard: "That's all, bye", anythingElseAsked: true }), 'goodbye');
+    assert.equal(decideCallerClosing({ heard: 'Bye', anythingElseAsked: true, anythingElseJustAsked: true }), 'goodbye');
+    assert.equal(decideCallerClosing({ heard: "That's all, bye", anythingElseAsked: true, anythingElseJustAsked: true }), 'goodbye');
   });
 
   it('carries on normally when the caller raises something new after the ask (check 2)', () => {
     assert.equal(
-      decideCallerClosing({ heard: 'Actually, do you work weekends?', anythingElseAsked: true }),
+      decideCallerClosing({ heard: 'Actually, do you work weekends?', anythingElseAsked: true, anythingElseJustAsked: true }),
       'none',
     );
     assert.equal(
-      decideCallerClosing({ heard: 'No, but can you send me a quote', anythingElseAsked: true }),
+      decideCallerClosing({ heard: 'No, but can you send me a quote', anythingElseAsked: true, anythingElseJustAsked: true }),
       'none',
     );
   });
 
+  it('treats a later bare "no" as an answer to her last question, not to "anything else?"', () => {
+    // Asked earlier, the caller raised something new, and Amy has since asked "is it urgent?".
+    for (const heard of ['No', 'No thanks', 'Nope']) {
+      assert.equal(
+        decideCallerClosing({ heard, anythingElseAsked: true, anythingElseJustAsked: false }),
+        'none',
+        heard,
+      );
+    }
+  });
+
+  it('says goodbye, never a second ask, on a real goodbye later in the call', () => {
+    assert.equal(
+      decideCallerClosing({ heard: 'Cheers, bye', anythingElseAsked: true, anythingElseJustAsked: false }),
+      'goodbye',
+    );
+  });
+
   it('is an ordinary turn when nobody is closing', () => {
-    assert.equal(decideCallerClosing({ heard: 'I need a boiler service', anythingElseAsked: false }), 'none');
+    assert.equal(decideCallerClosing({ heard: 'I need a boiler service', anythingElseAsked: false, anythingElseJustAsked: false }), 'none');
     // A bare "no" before anything was asked is an answer to some other question.
-    assert.equal(decideCallerClosing({ heard: 'No', anythingElseAsked: false }), 'none');
+    assert.equal(decideCallerClosing({ heard: 'No', anythingElseAsked: false, anythingElseJustAsked: false }), 'none');
   });
 });
 

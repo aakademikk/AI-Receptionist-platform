@@ -201,6 +201,7 @@ describe('RelaySession', () => {
         heard: 'hello',
         turn: 1,
         anythingElseAsked: false,
+        anythingElseJustAsked: false,
       },
     ]);
   });
@@ -394,6 +395,29 @@ describe('RelaySession', () => {
       assert.deepEqual(
         requests.map((request) => request.anythingElseAsked),
         [false, true, true],
+      );
+    });
+
+    it('marks "just asked" only on the turn straight after the ask, so a later "no" is just a no', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const { session } = sessionWithLog({ reply: fn });
+      await session.handle(SETUP);
+
+      const first = session.handle(finalPrompt("that's all, bye"));
+      resolve(0, ASKED);
+      await first;
+
+      const second = session.handle(finalPrompt('actually, can I get a quote'));
+      resolve(1, ORDINARY);
+      await second;
+
+      const third = session.handle(finalPrompt('no'));
+      resolve(2, ORDINARY);
+      await third;
+
+      assert.deepEqual(
+        requests.map((request) => request.anythingElseJustAsked),
+        [false, true, false],
       );
     });
 
