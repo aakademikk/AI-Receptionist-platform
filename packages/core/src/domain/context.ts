@@ -74,6 +74,19 @@ export async function loadBusinessContextBySlug(slug: string): Promise<BusinessC
  * parallel — they are independent, and serialising three round trips for no
  * reason is the kind of thing that turns a 300ms webhook into a second.
  */
+/**
+ * A spoken reply the caller talked over, as the model should read it: what they heard,
+ * and a note that the rest never reached them. Without this the model believes it asked
+ * something the caller never heard it ask. See `recordInterruptedTurn`.
+ */
+export function asHeard(body: string | null, metadata: Record<string, unknown> | null | undefined): string | null {
+  if (!metadata || metadata.interrupted !== true) return body;
+  const heard = typeof metadata.heard === 'string' ? metadata.heard.trim() : '';
+  return heard
+    ? `${heard} (cut off here: the caller spoke over the rest and did not hear it)`
+    : `(The caller spoke over this reply before hearing any of it. Unheard: ${body})`;
+}
+
 export async function loadConversationMemory(conversationId: string): Promise<ConversationMemory> {
   const supabase = getAdminClient();
 
@@ -89,7 +102,7 @@ export async function loadConversationMemory(conversationId: string): Promise<Co
       .single(),
     supabase
       .from('messages')
-      .select('id, direction, sender, body, created_at')
+      .select('id, direction, sender, body, created_at, metadata')
       .eq('conversation_id', conversationId)
       // Newest-first with a limit, then reversed below. Ordering ascending with a
       // limit would return the *oldest* N, which is the opposite of what a model
@@ -109,9 +122,12 @@ export async function loadConversationMemory(conversationId: string): Promise<Co
   const messages = unwrap(messagesResult, 'loadConversationMemory.messages');
   const lead = unwrapMaybe(leadResult, 'loadConversationMemory.lead');
 
-  const transcript: TranscriptMessage[] = (messages as TranscriptMessage[])
+  const transcript: TranscriptMessage[] = (
+    messages as Array<TranscriptMessage & { metadata?: Record<string, unknown> | null }>
+  )
     .slice()
-    .reverse(); // back to chronological order for the model
+    .reverse() // back to chronological order for the model
+    .map(({ metadata, ...message }) => ({ ...message, body: asHeard(message.body, metadata) }));
 
   const known: KnownLeadFields = {
     name: lead?.name ?? conversation.customer_name ?? null,

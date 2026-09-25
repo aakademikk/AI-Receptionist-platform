@@ -208,10 +208,28 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
       conversationId: result.conversationId,
       endCall: muted.endCall,
     });
+    // Written down like any other spoken line, so the transcript shows what the caller heard.
+    await recordAssistantTurn({
+      conversationId: result.conversationId,
+      body: muted.speak,
+      sender: 'system',
+      aiLogId: null,
+      callSid: input.callSid,
+      turn: input.turn,
+      traceId,
+    });
     return { ...base, ...muted };
   }
 
-  await recordAssistantTurn(result, traceId);
+  await recordAssistantTurn({
+    conversationId: result.conversationId,
+    body: result.reply.body,
+    sender: result.reply.sender,
+    aiLogId: result.reply.aiLogId,
+    callSid: input.callSid,
+    turn: input.turn,
+    traceId,
+  });
 
   /*
    * The last guard before text becomes audio. `generateReply` has already shaped this
@@ -285,33 +303,82 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
  *
  * Failure is logged and swallowed. The caller has already heard the words; throwing now
  * would turn a slightly incomplete transcript into a dropped call.
+ *
+ * The call and turn go in `metadata`, not `provider_message_id` (see above), so that
+ * `recordInterruptedTurn` can find this row if the caller speaks over it.
  */
-async function recordAssistantTurn(
-  result: HandleInboundMessageResult,
-  traceId: string,
-): Promise<void> {
-  const reply = result.reply;
-  if (!reply) return;
-
+async function recordAssistantTurn(turn: {
+  conversationId: string;
+  body: string;
+  sender: 'ai' | 'system' | 'human';
+  aiLogId: string | null;
+  callSid: string;
+  turn: number;
+  traceId: string;
+}): Promise<void> {
   try {
     const { error } = await getAdminClient().rpc('append_message', {
-      p_conversation_id: result.conversationId,
+      p_conversation_id: turn.conversationId,
       p_direction: 'outbound',
-      p_sender: reply.sender,
-      p_body: reply.body,
-      p_channel: reply.channel,
+      p_sender: turn.sender,
+      p_body: turn.body,
+      p_channel: 'voice',
       p_provider: 'twilio',
       // Spoken, not queued. The default for an outbound message is `queued`, which for a
       // row written after the caller has already heard it is a lie the dashboard shows.
       p_status: 'delivered',
-      p_ai_log_id: reply.aiLogId,
+      p_ai_log_id: turn.aiLogId,
+      p_metadata: { callSid: turn.callSid, turn: turn.turn },
     });
 
     if (error) throw new Error(error.message);
   } catch (error) {
     logger.warn('Could not record the assistant turn', {
-      traceId,
-      conversationId: result.conversationId,
+      traceId: turn.traceId,
+      conversationId: turn.conversationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * The caller spoke over a reply before hearing all of it. Mark its row with what they did
+ * hear, so the dashboard and the next turn's prompt both know the rest never reached them
+ * (the model would otherwise believe it had asked for a postcode nobody heard it ask for).
+ *
+ * The composed text stays in `body` for the record; `metadata.heard` is what was said out
+ * loud. Called by the relay without awaiting, and failure is only logged: the call goes on.
+ */
+export async function recordInterruptedTurn(input: {
+  callSid: string;
+  turn: number;
+  heard: string;
+}): Promise<void> {
+  try {
+    const supabase = getAdminClient();
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, metadata')
+      .eq('direction', 'outbound')
+      .eq('metadata->>callSid', input.callSid)
+      .eq('metadata->>turn', String(input.turn))
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) {
+      logger.warn('No recorded reply to mark as cut off', { callSid: input.callSid, turn: input.turn });
+      return;
+    }
+
+    const row = data as { id: string; metadata: Record<string, unknown> | null };
+    const { error: updateError } = await supabase
+      .from('messages')
+      .update({ metadata: { ...(row.metadata ?? {}), interrupted: true, heard: input.heard } })
+      .eq('id', row.id);
+    if (updateError) throw new Error(updateError.message);
+  } catch (error) {
+    logger.warn('Could not mark a reply as cut off', {
+      callSid: input.callSid,
+      turn: input.turn,
       error: error instanceof Error ? error.message : String(error),
     });
   }

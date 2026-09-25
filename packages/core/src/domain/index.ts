@@ -58,6 +58,7 @@ export {
 } from './pipeline.ts';
 
 export {
+  recordInterruptedTurn,
   replyToCaller,
   type VoiceTurnInput,
   type VoiceTurnResult,

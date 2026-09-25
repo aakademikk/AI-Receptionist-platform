@@ -786,6 +786,14 @@ const RELAY_URL = 'wss://receptionist.aaa123.uk/relay';
  * that would fail silently are the scheme check and the greeting's placement.
  */
 describe('buildConversationRelayTwiml', () => {
+  it('emits speechTimeout when given, and refuses a value Twilio would reject', () => {
+    assert.match(buildConversationRelayTwiml({ url: RELAY_URL, speechTimeout: 1200 }), /speechTimeout="1200"/);
+    assert.doesNotMatch(buildConversationRelayTwiml({ url: RELAY_URL }), /speechTimeout/);
+    for (const bad of [599, 5001, 1200.5]) {
+      assert.throws(() => buildConversationRelayTwiml({ url: RELAY_URL, speechTimeout: bad }));
+    }
+  });
+
   it('connects under <Connect> rather than as a bare verb', () => {
     const xml = buildConversationRelayTwiml({ url: RELAY_URL });
     assert.match(xml, /<Connect>\s*<ConversationRelay url="wss:\/\/receptionist\.aaa123\.uk\/relay" \/>\s*<\/Connect>/);

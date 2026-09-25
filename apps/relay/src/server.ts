@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 
-import { STILL_THERE_LINE, replyToCaller } from '@atwood/core/domain';
+import { STILL_THERE_LINE, recordInterruptedTurn, replyToCaller } from '@atwood/core/domain';
 import { serverEnv } from '@atwood/core/env';
 import { validateTwilioSignature } from '@atwood/core/integrations/twilio';
 import { logger } from '@atwood/core/utils';
@@ -138,6 +138,8 @@ sockets.on('connection', (ws: WebSocket) => {
     // its one line comes from core with the rest of the call's copy.
     send,
     stillThereLine: STILL_THERE_LINE,
+    // Not awaited: the caller is mid-sentence, and the transcript can catch up.
+    onInterrupted: (info) => void recordInterruptedTurn(info),
   });
 
   ws.on('message', (data) => {

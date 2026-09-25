@@ -67,6 +67,14 @@ export function conversationRelayTwiml(input: {
      */
     ttsLanguage: 'en-GB',
     transcriptionProvider: 'Deepgram',
+    /*
+     * Wait 1.2 s of silence before a turn is final, instead of Twilio's `auto`. On
+     * 2026-09-25 `auto` split "Hey yo, I just called, man ... is anyone on the way?" into
+     * two turns at the pause, so the reply to the first half was cut off at its first
+     * syllable by the second half: the "gibberish" a caller hears. A starting value, to be
+     * tuned on real calls: raise it if sentences still split, lower it if replies feel slow.
+     */
+    speechTimeout: 1200,
     ttsProvider: 'ElevenLabs',
     voice: VOICE_ID,
     parameters: {

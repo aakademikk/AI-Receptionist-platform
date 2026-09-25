@@ -438,6 +438,70 @@ describe('RelaySession', () => {
       assert.equal(requests[1]!.anythingElseAsked, false);
     });
 
+    it('takes the question back when the caller spoke over it before hearing it (live 2026-09-25)', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const interrupted: Array<{ callSid: string; turn: number; heard: string }> = [];
+      const events: string[] = [];
+      const session = new RelaySession({
+        reply: fn,
+        onEvent: (event) => events.push(event),
+        onInterrupted: (info) => interrupted.push(info),
+      });
+      await session.handle(SETUP);
+
+      // "My name is Billy, and I need help." — the ask goes out in full...
+      const first = session.handle(finalPrompt('My name is Billy, and I need help.'));
+      resolve(0, ASKED);
+      assert.equal((await first).length, 1);
+
+      // ...then the rest of the sentence cuts it off before a word plays.
+      await session.handle({ type: 'interrupt', utteranceUntilInterrupt: '', durationUntilInterruptMs: 0 });
+      const second = session.handle(finalPrompt('Emergency.'));
+      resolve(1, ORDINARY);
+      await second;
+
+      assert.equal(requests[1]!.anythingElseJustAsked, false, 'the unheard question must not make "Emergency." an answer');
+      assert.equal(requests[1]!.anythingElseAsked, false);
+      assert.deepEqual(interrupted, [{ callSid: 'CA123', turn: 1, heard: '' }]);
+      assert.ok(events.includes('reply_cut_off'));
+    });
+
+    it('keeps the question when the caller only spoke over it after hearing it out', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const interrupted: unknown[] = [];
+      const session = new RelaySession({ reply: fn, onInterrupted: (info) => interrupted.push(info) });
+      await session.handle(SETUP);
+
+      const first = session.handle(finalPrompt("that's all, bye"));
+      resolve(0, ASKED);
+      await first;
+      await session.handle({ type: 'interrupt', utteranceUntilInterrupt: ASKED.speak, durationUntilInterruptMs: 2900 });
+      const second = session.handle(finalPrompt('no'));
+      resolve(1, ORDINARY);
+      await second;
+
+      assert.equal(requests[1]!.anythingElseJustAsked, true);
+      assert.deepEqual(interrupted, []);
+    });
+
+    it('reports a cut-off ordinary reply with what was heard, and changes no closing state', async () => {
+      const { fn, requests, resolve } = deferredReply();
+      const interrupted: Array<{ turn: number; heard: string }> = [];
+      const session = new RelaySession({ reply: fn, onInterrupted: (info) => interrupted.push(info) });
+      await session.handle(SETUP);
+
+      const first = session.handle(finalPrompt('hello'));
+      resolve(0, { speak: 'Hi there, what can I do for you today?', endCall: false, closing: 'none' });
+      await first;
+      await session.handle({ type: 'interrupt', utteranceUntilInterrupt: 'Hi there,', durationUntilInterruptMs: 600 });
+      const second = session.handle(finalPrompt('I need a quote'));
+      resolve(1, ORDINARY);
+      await second;
+
+      assert.equal(requests[1]!.anythingElseJustAsked, false);
+      assert.deepEqual(interrupted.map(({ turn, heard }) => ({ turn, heard })), [{ turn: 1, heard: 'Hi there,' }]);
+    });
+
     it('stays false when the asking reply was superseded by a newer turn', async () => {
       const { fn, requests, resolve } = deferredReply();
       const { session } = sessionWithLog({ reply: fn });

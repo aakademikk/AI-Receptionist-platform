@@ -424,6 +424,12 @@ export function buildConversationRelayTwiml(options: {
   /** Provider-specific recognition model. */
   speechModel?: string;
   interruptible?: 'none' | 'dtmf' | 'speech' | 'any';
+  /**
+   * Milliseconds of caller silence before Twilio reports their turn as final, 600 to 5000.
+   * Omitted means Twilio's `auto`. Longer stops a mid-sentence pause from splitting one
+   * sentence into two turns, at the cost of that much more wait before every reply.
+   */
+  speechTimeout?: number;
   dtmfDetection?: boolean;
   /**
    * Extra values delivered to the socket in the `setup` message's `customParameters`.
@@ -469,6 +475,13 @@ export function buildConversationRelayTwiml(options: {
   }
   if (options.interruptible) {
     attributes.push(`interruptible="${escapeXml(options.interruptible)}"`);
+  }
+  if (options.speechTimeout !== undefined) {
+    // Checked here for the same reason as `url`: Twilio's own rejection is a failed call.
+    if (!Number.isInteger(options.speechTimeout) || options.speechTimeout < 600 || options.speechTimeout > 5000) {
+      throw badRequest(`ConversationRelay speechTimeout must be a whole number of ms from 600 to 5000, got ${options.speechTimeout}.`);
+    }
+    attributes.push(`speechTimeout="${options.speechTimeout}"`);
   }
   if (options.dtmfDetection) {
     attributes.push('dtmfDetection="true"');

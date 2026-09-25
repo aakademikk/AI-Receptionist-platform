@@ -193,7 +193,20 @@ export interface RelaySessionOptions {
    * transport. The silence backstop is off unless both this and `send` are given.
    */
   stillThereLine?: string;
+  /**
+   * Told when the caller spoke over a reply that had already been sent, with what of it
+   * they actually heard. The call record uses it so the transcript says what was said out
+   * loud, not what was merely composed.
+   */
+  onInterrupted?: (info: { callSid: string; turn: number; heard: string }) => void;
 }
+
+/**
+ * How much of a reply the caller must have heard for it to count as heard, as a share of
+ * its length. Questions sit at the end of a line ("... is there anything else?"), so a
+ * reply cut off before its end asked nothing.
+ */
+const HEARD_IN_FULL = 0.9;
 
 const NO_REPLY: RelayReplyFn = async () => ({
   speak: 'Sorry, something has gone wrong at our end. Please try again shortly.',
@@ -239,6 +252,22 @@ export class RelaySession {
    * call only as the answer to that reply; asked to any later question, it is just a no.
    */
   private anythingElseJustAsked = false;
+  /**
+   * The last reply sent to Twilio, with the closing state from before it, so an interrupt
+   * that cuts it off can take back a question the caller never heard.
+   *
+   * Observed 2026-09-25: recognition split the caller's sentence at a pause, the reply to
+   * the first half ("... is there anything else they should know?") went out, and the
+   * caller's second half interrupted it before a word played. The question still counted
+   * as asked, so the rest of their sentence was taken as the answer and the call ended.
+   */
+  private lastSpoken: {
+    turn: number;
+    token: string;
+    askedBefore: boolean;
+    justAskedBefore: boolean;
+  } | null = null;
+  private readonly onInterrupted: ((info: { callSid: string; turn: number; heard: string }) => void) | null;
 
   private readonly send: ((frames: OutboundFrame[]) => void) | null;
   private readonly stillThereToken: string;
@@ -258,6 +287,7 @@ export class RelaySession {
     this.reply = options.reply ?? NO_REPLY;
     this.onEvent = options.onEvent ?? (() => {});
     this.send = options.send ?? null;
+    this.onInterrupted = options.onInterrupted ?? null;
     // Sanitised once, here: a line that sanitises to nothing disables the backstop rather
     // than sending the empty token Twilio drops the call for.
     this.stillThereToken = sanitiseForSpeech(options.stillThereLine ?? '');
@@ -320,6 +350,7 @@ export class RelaySession {
           discardedTurn: this.pendingTurn || null,
         });
         this.pendingTurn = 0;
+        this.takeBackUnheard(typeof frame.utteranceUntilInterrupt === 'string' ? frame.utteranceUntilInterrupt : '');
         return [];
 
       case 'dtmf':
@@ -404,11 +435,14 @@ export class RelaySession {
     }
     this.pendingTurn = 0;
 
+    const askedBefore = this.anythingElseAsked;
+    const justAskedBefore = this.anythingElseJustAsked;
     if (reply.closing === 'asked_anything_else') this.anythingElseAsked = true;
     this.anythingElseJustAsked = reply.closing === 'asked_anything_else';
 
     const messages: OutboundFrame[] = [];
     const token = sanitiseForSpeech(reply.speak);
+    this.lastSpoken = token === '' ? null : { turn, token, askedBefore, justAskedBefore };
 
     if (token === '') {
       // Twilio rejects an empty `text` token outright. Saying nothing is the safe
@@ -454,6 +488,8 @@ export class RelaySession {
       if (this.ended || this.disposed) return;
 
       send([{ type: 'text', token: this.stillThereToken, last: true }]);
+      // Not a turn's reply, so an interrupt over it has nothing to take back.
+      this.lastSpoken = null;
       const hangupAfterMs = estimatedSpeechMs(this.stillThereToken) + SILENCE_HANGUP_MS;
       this.onEvent('silence_prompt', { turn, hangupAfterMs });
 
@@ -466,6 +502,24 @@ export class RelaySession {
         this.onEvent('session_end', { turns: this.turns, reason: 'silence' });
       }, hangupAfterMs);
     }, promptAfterMs);
+  }
+
+  /**
+   * The caller spoke over the last reply sent. If they did not hear it to the end, it
+   * asked nothing: put the closing state back to what it was before that reply, and tell
+   * the call record what was actually heard. See `lastSpoken`.
+   */
+  private takeBackUnheard(heard: string): void {
+    const last = this.lastSpoken;
+    this.lastSpoken = null;
+    if (!last) return;
+    if (heard.trim().length >= last.token.length * HEARD_IN_FULL) return;
+
+    const tookBack = this.anythingElseJustAsked && !last.justAskedBefore;
+    this.anythingElseAsked = last.askedBefore;
+    this.anythingElseJustAsked = last.justAskedBefore;
+    this.onEvent('reply_cut_off', { turn: last.turn, heardChars: heard.trim().length, tookBackQuestion: tookBack });
+    this.onInterrupted?.({ callSid: this.call?.callSid ?? '', turn: last.turn, heard: heard.trim() });
   }
 
   private cancelSilenceBackstop(byFrame: string): void {
