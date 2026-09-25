@@ -246,6 +246,15 @@ export interface ConversationMemory {
   /** Known lead fields so the AI stops asking for things it already has. */
   known: KnownLeadFields;
   is_returning_contact: boolean;
+  /** When the assistant was last muted on this thread, by a handover or a take-over. */
+  muted_at?: string | null;
+  /** Why the thread was handed over, while it is waiting for a person. */
+  handover_reason?: HandoverReason | null;
+  /**
+   * Set by the pipeline, never loaded: this call joined a thread that was muted on an
+   * EARLIER call. The assistant answers, knowing a colleague already owes a callback.
+   */
+  callback_pending?: boolean;
 }
 
 export interface KnownLeadFields {

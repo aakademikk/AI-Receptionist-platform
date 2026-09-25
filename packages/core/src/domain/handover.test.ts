@@ -3,11 +3,13 @@ import { describe, it } from 'node:test';
 
 import {
   detectHandover,
+  isMuteFromEarlierCall,
   needsDetailCapture,
   renderCaptureMessage,
   shouldIncrementConfusion,
 } from './handover.ts';
 import type { BusinessContext, ConversationMemory } from '../types/domain.ts';
+import { buildReceptionistSystemPrompt } from '../prompts/receptionist.ts';
 
 /**
  * Handover is the highest-consequence logic in the platform: a missed emergency is
@@ -361,5 +363,48 @@ describe('detectHandover — guards', () => {
       inboundText: '   ',
     });
     assert.equal(decision.shouldHandover, false);
+  });
+});
+
+describe('isMuteFromEarlierCall', () => {
+  const handedOver = '2026-09-25T14:12:30.000Z';
+
+  it('a caller ringing back after the handover is answered', () => {
+    assert.equal(isMuteFromEarlierCall({ mutedAt: handedOver, thisCallStartedAt: '2026-09-25T14:15:08.000Z' }), true);
+  });
+
+  it('the call that raised the handover stays muted for its capture answer', () => {
+    assert.equal(isMuteFromEarlierCall({ mutedAt: handedOver, thisCallStartedAt: '2026-09-25T14:12:21.000Z' }), false);
+  });
+
+  it('stays muted when either time is unknown (switched off by hand, or no call id)', () => {
+    assert.equal(isMuteFromEarlierCall({ mutedAt: null, thisCallStartedAt: '2026-09-25T14:15:08.000Z' }), false);
+    assert.equal(isMuteFromEarlierCall({ mutedAt: handedOver, thisCallStartedAt: null }), false);
+    assert.equal(isMuteFromEarlierCall({ mutedAt: undefined, thisCallStartedAt: undefined }), false);
+  });
+
+  it('compares instants, not strings, so offsets do not fool it', () => {
+    // 15:15 BST is 14:15 UTC, after the 14:12 UTC handover.
+    assert.equal(isMuteFromEarlierCall({ mutedAt: '2026-09-25 14:12:30+00', thisCallStartedAt: '2026-09-25T15:15:08+01:00' }), true);
+  });
+});
+
+describe('prompt for a caller ringing back after a handover', () => {
+  const prompt = (memory: Partial<ConversationMemory>) =>
+    buildReceptionistSystemPrompt({
+      context: makeContext(),
+      memory: makeMemory({ channel: 'voice', status: 'waiting_for_human', ai_enabled: false, ...memory }),
+      now: new Date('2026-09-25T14:15:00Z'),
+    });
+
+  it('tells the assistant a colleague already owes a callback, and why', () => {
+    const text = prompt({ callback_pending: true, handover_reason: 'emergency' });
+    assert.match(text, /A colleague already owes this person a callback/);
+    assert.match(text, /a possible emergency/);
+    assert.match(text, /999/);
+  });
+
+  it('says nothing about it on an ordinary conversation', () => {
+    assert.doesNotMatch(prompt({ status: 'active', ai_enabled: true }), /owes this person a callback/);
   });
 });

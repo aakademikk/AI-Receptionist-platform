@@ -83,7 +83,7 @@ export async function loadConversationMemory(conversationId: string): Promise<Co
       .select(
         `id, business_id, contact_id, channel, status, customer_phone, customer_name,
          summary, current_topic, lead_status, ai_enabled, ai_turn_count,
-         confusion_count, message_count`,
+         confusion_count, message_count, handover_at, taken_over_at, handover_reason_code`,
       )
       .eq('id', conversationId)
       .single(),
@@ -152,6 +152,13 @@ export async function loadConversationMemory(conversationId: string): Promise<Co
     transcript,
     known,
     is_returning_contact: isReturning,
+    // The later of the two, because either one is what switched the assistant off.
+    muted_at:
+      [conversation.handover_at, conversation.taken_over_at]
+        .filter((t): t is string => typeof t === 'string')
+        .sort()
+        .at(-1) ?? null,
+    handover_reason: conversation.handover_reason_code ?? null,
   };
 }
 

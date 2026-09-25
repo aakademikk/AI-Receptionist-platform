@@ -1,6 +1,7 @@
 import type {
   BusinessContext,
   ConversationMemory,
+  HandoverReason,
   KnownLeadFields,
 } from '../types/domain.ts';
 import { describeOpeningHours, isOpenNow } from '../utils/hours.ts';
@@ -384,6 +385,20 @@ function renderRules(
   return lines.join('\n');
 }
 
+/** How a handover reason reads to the model when it explains a pending callback. */
+const HANDOVER_REASON_WORDS: Record<HandoverReason, string> = {
+  customer_request: 'they asked for a person',
+  emergency: 'a possible emergency',
+  urgent: 'an urgent job',
+  complaint: 'a complaint',
+  repeated_confusion: 'the conversation was going in circles',
+  low_confidence: 'it needed a person',
+  keyword: 'it needed a person',
+  manual: 'a colleague took it over',
+  ai_error: 'a technical problem',
+  out_of_scope: 'it was outside what the assistant handles',
+};
+
 function renderConversationState(
   memory: ConversationMemory,
   signature: string | null,
@@ -402,6 +417,16 @@ function renderConversationState(
 
   if (memory.customer_name) {
     lines.push('', `You are speaking to: ${memory.customer_name}`);
+  }
+
+  if (memory.callback_pending) {
+    const why = memory.handover_reason ? ` (${HANDOVER_REASON_WORDS[memory.handover_reason]})` : '';
+    lines.push(
+      '',
+      '### A colleague already owes this person a callback',
+      '',
+      `Earlier, this conversation was passed to a colleague${why}, who has been alerted and will get back to them. This is the customer getting in touch again. Tell them that plainly, reassure them, and take down anything new they want to add. Do not promise a time, and do not say you will pass it on as if nobody knew yet. If anyone is in danger right now, tell them to ring 999.`,
+    );
   }
 
   if (memory.summary) {

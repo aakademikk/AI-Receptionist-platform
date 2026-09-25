@@ -2,7 +2,13 @@ import { getAdminClient } from '../supabase/admin.ts';
 import type { HandoverReason } from '../types/domain.ts';
 import { logger, newTraceId } from '../utils/logger.ts';
 import { cleanForSpeech } from '../utils/speech.ts';
-import { ANYTHING_ELSE_LINE, GOODBYE_LINE, decideCallerClosing, isWrapUpLine } from './closing.ts';
+import {
+  ANYTHING_ELSE_LINE,
+  GOODBYE_LINE,
+  decideCallerClosing,
+  decideMutedTurn,
+  isWrapUpLine,
+} from './closing.ts';
 import { handleInboundMessage, type HandleInboundMessageResult } from './pipeline.ts';
 
 /**
@@ -135,6 +141,11 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
        * a second caller turn — and a second model call, and a second charge for one.
        */
       providerMessageId: `${input.callSid}:${input.turn}`,
+      /*
+       * Lets the pipeline tell a handover on this call from one on an earlier call: only
+       * the first mutes this call. See `isMuteFromEarlierCall`.
+       */
+      callSid: input.callSid,
       deferExtraction: true,
       cannedReply,
       traceId,
@@ -178,23 +189,26 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
 
   if (!result.reply) {
     /*
-     * The assistant is muted because a person has taken this conversation over. On SMS
-     * that correctly produces no outbound message and nothing looks wrong. On a call it
-     * produces dead air, so the caller is told what is happening and the line closes.
+     * The assistant is muted. On voice that only happens after a handover earlier on this
+     * same call: a caller ringing back is answered (see `isMuteFromEarlierCall`).
+     * On SMS a muted thread correctly produces no outbound message; on a call it would be
+     * dead air, so the caller is told their details have been passed on.
      *
-     * This is also the turn that ends a capture: the caller has just answered the question
-     * the handover asked them, so the line has done its job and "I'll make sure a colleague
-     * picks it up with you" is now something we can stand behind. The details they gave are
-     * extracted by the pipeline on this same turn.
+     * This used to hang up on the first answer with "I can't help with this one over the
+     * phone", which is the wrong thing to say to someone who has just reported a fire, and
+     * it cut them off at their first pause. Now the line stays open for one more answer;
+     * see `decideMutedTurn`. The details are extracted by the pipeline on each such turn.
      *
      * No second notification is raised: the pipeline has already enqueued one for the
      * owner, and this turn adds nothing they do not have.
      */
-    logger.info('Voice turn produced no reply; ending the call', {
+    const muted = decideMutedTurn({ anythingElseJustAsked: input.anythingElseJustAsked ?? false });
+    logger.info('Voice turn on a muted conversation', {
       traceId,
       conversationId: result.conversationId,
+      endCall: muted.endCall,
     });
-    return { ...base, speak: CANNOT_TAKE_CALL, endCall: true, closing: 'none' };
+    return { ...base, ...muted };
   }
 
   await recordAssistantTurn(result, traceId);
@@ -242,9 +256,9 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
      * Except when there is something further to offer, which is the one case a handover
      * was ever wrong about: `capturePending` means the caller has been asked for their
      * details rather than told goodbye, so the line stays open for the answer. That answer
-     * arrives on a muted conversation, so the `!result.reply` branch above closes the call
-     * on the following turn — the capture does not need a second branch here, it just
-     * needs this one not to hang up first.
+     * arrives on a muted conversation, so the `!result.reply` branch above takes it from
+     * there (thank them, one more answer, then goodbye) — the capture does not need a
+     * second branch here, it just needs this one not to hang up first.
      */
     endCall: base.handover !== null && !result.capturePending,
   };

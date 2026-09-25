@@ -4,8 +4,11 @@ import { describe, it } from 'node:test';
 import {
   ANYTHING_ELSE_LINE,
   GOODBYE_LINE,
+  PASSED_ON_GOODBYE_LINE,
+  PASSED_ON_LINE,
   STILL_THERE_LINE,
   decideCallerClosing,
+  decideMutedTurn,
   isCallerClosing,
   isDecliningMore,
   isWrapUpLine,
@@ -178,5 +181,32 @@ describe('isWrapUpLine', () => {
     ]) {
       assert.equal(isWrapUpLine(speak), false, JSON.stringify(speak));
     }
+  });
+});
+
+describe('decideMutedTurn', () => {
+  it('thanks the caller and keeps the line open for one more answer', () => {
+    assert.deepEqual(decideMutedTurn({ anythingElseJustAsked: false }), {
+      speak: PASSED_ON_LINE,
+      endCall: false,
+      closing: 'asked_anything_else',
+    });
+  });
+
+  it('says goodbye and hangs up once that answer is in, whatever it was', () => {
+    assert.deepEqual(decideMutedTurn({ anythingElseJustAsked: true }), {
+      speak: PASSED_ON_GOODBYE_LINE,
+      endCall: true,
+      closing: 'none',
+    });
+  });
+
+  it('never tells a caller who has been handed over that nobody can help', () => {
+    for (const line of [PASSED_ON_LINE, PASSED_ON_GOODBYE_LINE]) {
+      assert.doesNotMatch(line, /can't help|cannot help|unable to help/i);
+      assert.doesNotMatch(line, /[*_#<>]/);
+    }
+    assert.ok(PASSED_ON_LINE.endsWith('?'));
+    assert.ok(!PASSED_ON_GOODBYE_LINE.endsWith('?'));
   });
 });

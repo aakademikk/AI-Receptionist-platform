@@ -4,6 +4,7 @@ import { logger, newTraceId } from '../utils/logger.ts';
 import { loadBusinessContext, loadConversationMemory, needsSummarisation } from './context.ts';
 import {
   detectHandover,
+  isMuteFromEarlierCall,
   needsDetailCapture,
   renderCaptureMessage,
   renderHandoverMessage,
@@ -152,6 +153,11 @@ export interface HandleInboundMessageInput {
   body: string;
   channel?: CommsChannel;
   providerMessageId?: string | null;
+  /**
+   * Voice only: the call this message belongs to, so a handover on an earlier call does not
+   * mute this one. See `isMuteFromEarlierCall`.
+   */
+  callSid?: string | null;
   /**
    * Return the reply as soon as it exists, and run the work that follows it in the
    * background.
@@ -459,8 +465,46 @@ export async function handleInboundMessage(
     };
   }
 
+  /*
+   * A caller ringing back after a handover joins the muted thread, which is how the
+   * assistant can see what they reported. The mute itself belongs to the call it happened
+   * on, so on a later call the assistant answers, knowing a colleague owes a callback.
+   * See `isMuteFromEarlierCall`.
+   */
+  let callbackPending = false;
+  if (channel === 'voice' && input.callSid && !memory.ai_enabled && context.settings.ai_enabled) {
+    const { data: firstOfCall } = await supabase
+      .from('messages')
+      .select('created_at')
+      .eq('conversation_id', resolved.conversation_id)
+      .like('provider_message_id', `${input.callSid}:%`)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    callbackPending = isMuteFromEarlierCall({
+      mutedAt: memory.muted_at,
+      thisCallStartedAt: (firstOfCall as { created_at: string } | null)?.created_at,
+    });
+  }
+
+  if (callbackPending) {
+    log.info('Caller rang back on a thread handed over on an earlier call; the assistant answers');
+
+    // One alert per callback call, carrying the first thing they said, so the colleague
+    // who owes the callback knows the customer rang again.
+    await enqueueNotification({
+      businessId: resolved.business_id,
+      event: 'new_message',
+      subject: 'The customer rang back on a conversation waiting for you',
+      body: input.body,
+      payload: { customer_phone: input.fromNumber, conversation_id: resolved.conversation_id },
+      conversationId: resolved.conversation_id,
+      dedupeKey: `callback:${resolved.conversation_id}:${input.callSid}`,
+    });
+  }
+
   // The AI may be muted because a human took the thread over.
-  if (!memory.ai_enabled || !context.settings.ai_enabled) {
+  if ((!memory.ai_enabled && !callbackPending) || !context.settings.ai_enabled) {
     log.info('AI is muted for this conversation; recorded the message only');
 
     /*
@@ -505,7 +549,11 @@ export async function handleInboundMessage(
   const generated =
     input.cannedReply !== undefined
       ? { body: input.cannedReply, aiLogId: null, refused: null }
-      : await generateReply({ context, memory: memoryWithInbound, traceId });
+      : await generateReply({
+          context,
+          memory: callbackPending ? { ...memoryWithInbound, callback_pending: true } : memoryWithInbound,
+          traceId,
+        });
 
   // A provider refusal is not an error — it means a person is needed.
   if (generated.refused) {

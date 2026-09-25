@@ -37,6 +37,17 @@ export const GOODBYE_LINE = 'No problem. Thanks for calling, bye for now.';
 export const STILL_THERE_LINE = 'Are you still there?';
 
 /**
+ * Said after a handover, when the caller answers the details the handover asked for. The
+ * line stays open for one more answer, because recognition ends a turn at the caller's
+ * first pause and "my name is Jim, and my house" is not everything Jim meant to say.
+ */
+export const PASSED_ON_LINE =
+  "Thank you, I've passed that on and someone will ring you back as soon as they can. Is there anything else they should know?";
+
+/** Said after a handover once the caller has had that one more answer. The call ends. */
+export const PASSED_ON_GOODBYE_LINE = 'Thank you. Someone will be in touch as soon as they can. Bye for now.';
+
+/**
  * Words that say the caller is leaving. At least one must be present: "thanks" or "okay"
  * on their own are how people acknowledge an answer, not how they end a call.
  */
@@ -211,6 +222,27 @@ export function decideCallerClosing(input: {
     return isCallerClosing(input.heard) ? 'goodbye' : 'none';
   }
   return isCallerClosing(input.heard) ? 'ask_anything_else' : 'none';
+}
+
+/**
+ * What to say on a call whose assistant is muted, which on voice only happens after a
+ * handover earlier in the same call (a caller ringing back is answered; see
+ * `isMuteFromEarlierCall` in `handover.ts`).
+ *
+ *  * First answer after the handover: thank them, say it has been passed on, and ask if
+ *    there is anything else. The relay's silence backstop closes the line if they have
+ *    nothing to add.
+ *  * The answer to that question, whatever it is: it has been recorded, so say goodbye and
+ *    hang up. Asked at most once, so a caller cannot be kept on a muted line.
+ */
+export function decideMutedTurn(input: {
+  /** The reply the caller is answering was an "anything else?" question. */
+  anythingElseJustAsked: boolean;
+}): { speak: string; endCall: boolean; closing: 'asked_anything_else' | 'none' } {
+  if (input.anythingElseJustAsked) {
+    return { speak: PASSED_ON_GOODBYE_LINE, endCall: true, closing: 'none' };
+  }
+  return { speak: PASSED_ON_LINE, endCall: false, closing: 'asked_anything_else' };
 }
 
 /** Ways the assistant signs off. Broad on purpose: see the module header. */

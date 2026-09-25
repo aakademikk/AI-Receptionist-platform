@@ -318,3 +318,24 @@ export function renderCaptureMessage(context: BusinessContext): string {
   const businessName = context.profile.trading_name ?? context.name;
   return `Of course. I'll ask a colleague at ${businessName} to ring you back on this number. Before I do, can I take your name, and a rough idea of what you need?`;
 }
+
+/**
+ * A handover mutes the call it happened on, not the caller's next call.
+ *
+ * On voice the conversation is shared by every call from the same number inside the
+ * session window (migration 0014), so a caller who rings back after a handover lands on
+ * the muted thread. That is right for context: the assistant can see what they reported.
+ * It is wrong for the mute: silencing the callback leaves a customer who rang to ask
+ * "has anyone called me?" with a canned line and a hang-up.
+ *
+ * True when the thread was muted before this call's first message, i.e. on an earlier
+ * call. Both timestamps come from the same database clock. Without a mute time (the
+ * assistant switched off by hand) or without this call's first message, it stays muted.
+ */
+export function isMuteFromEarlierCall(input: {
+  mutedAt: string | null | undefined;
+  thisCallStartedAt: string | null | undefined;
+}): boolean {
+  if (!input.mutedAt || !input.thisCallStartedAt) return false;
+  return new Date(input.thisCallStartedAt).getTime() > new Date(input.mutedAt).getTime();
+}
