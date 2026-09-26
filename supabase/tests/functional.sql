@@ -371,6 +371,9 @@ declare
   h record;
   h2 record;
   v_sent int;
+  v_acme_claimed int;
+  v_acme_email_claimed int;
+  v_dashboard_claimed int;
 begin
   select id into v_conv from public.conversations
   where business_id = 'aaaaaaaa-0000-0000-0000-000000000001' limit 1;
@@ -417,8 +420,43 @@ begin
   end if;
 
   -- The worker claims only deliverable channels; dashboard stays for in-app read.
-  if (select count(*) from public.claim_notifications(10)) <> 1 then
-    raise exception 'FAIL: claim_notifications should return exactly the email row';
+  --
+  -- claim_notifications() is global by design (one worker drains every tenant),
+  -- so on a populated database it also returns other tenants' due rows, and a
+  -- small limit could fill with older ones before it reaches the fixture's. The
+  -- limit is therefore the size of the whole table, so every due row is claimed
+  -- in one call, and only the fixture tenant's share is judged. The enclosing
+  -- transaction rolls back, so no other tenant's row is changed for good.
+  select
+    count(*) filter (where c.business_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+    count(*) filter (where c.business_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+                       and c.channel = 'email'
+                       and c.destination = 'owner@acme.test'
+                       and c.dedupe_key like 'handover:' || v_conv::text || ':%'
+                       and c.status = 'sending'
+                       and c.attempts = 1),
+    count(*) filter (where c.channel = 'dashboard')
+  into v_acme_claimed, v_acme_email_claimed, v_dashboard_claimed
+  from public.claim_notifications((select count(*)::int from public.notifications)) c;
+
+  if v_acme_claimed <> 1 or v_acme_email_claimed <> 1 then
+    raise exception 'FAIL: claim_notifications should return exactly the email row for the fixture tenant (got % row(s), % of them the email)',
+      v_acme_claimed, v_acme_email_claimed;
+  end if;
+  if v_dashboard_claimed <> 0 then
+    raise exception 'FAIL: claim_notifications handed out % dashboard row(s)', v_dashboard_claimed;
+  end if;
+
+  -- ...and the fixture's dashboard row is left exactly as it was.
+  if not exists (
+    select 1 from public.notifications
+    where business_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+      and channel = 'dashboard'
+      and dedupe_key like 'handover:' || v_conv::text || ':%'
+      and status = 'pending'
+      and attempts = 0
+  ) then
+    raise exception 'FAIL: the dashboard notification was touched by the claim';
   end if;
 
   -- Handing back to the AI resets the escalation state.
