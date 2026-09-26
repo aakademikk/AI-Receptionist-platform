@@ -643,8 +643,12 @@ declare
   v_result jsonb;
   v_calls_before int;
 begin
-  select id into v_contact from public.contacts
-  where business_id = 'aaaaaaaa-0000-0000-0000-000000000001' limit 1;
+  -- The missed-call caller from section 1, whose thread section 2 wrote to.
+  -- Chosen by number: section 1 also creates contacts with no messages, so an
+  -- unordered `limit 1` could pick one of those and the test would prove nothing.
+  select id into strict v_contact from public.contacts
+  where business_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+    and phone = '+447700900123';
 
   select count(*) into v_calls_before from public.calls
   where business_id = 'aaaaaaaa-0000-0000-0000-000000000001';
