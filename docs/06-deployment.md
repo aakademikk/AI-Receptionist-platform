@@ -112,6 +112,25 @@ done
 Activate them in the n8n UI. The scheduled ones (09, 11, 12) start immediately;
 the webhook ones need their URLs registered with Twilio (below).
 
+### Delivering notifications without n8n
+
+Owner alerts are queued whether or not n8n runs, but they are only sent when
+something calls `POST /api/internal/v1/notifications/drain`. Workflow 09 does
+that every minute. On a box without it, install the systemd user timer instead:
+
+```bash
+cp scripts/systemd/atwood-notify-drain.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+node scripts/drain-notifications.mjs --limit 1   # one row, by hand, first
+systemctl --user enable --now atwood-notify-drain.timer
+journalctl --user -u atwood-notify-drain.service -n 20
+```
+
+Running both is safe (the claim skips locked rows), but one is enough. Before the
+first drain on a box that has been running without one, look at the backlog:
+every row in it will be sent, however old. See
+`docs/incidents/2026-09-26-owner-alerts-never-sent.md`.
+
 ---
 
 ## Twilio
@@ -315,7 +334,9 @@ The order matters, because each step's verification depends on the previous one.
 | Signal | Query |
 |---|---|
 | Model failures | `select * from ai_logs where status <> 'ok' order by created_at desc` |
-| Stuck notifications | `select * from notifications where status = 'pending' and attempts >= 5` |
+| Notifications never attempted (no drainer running) | `select * from notifications where status = 'pending' and attempts = 0 and channel <> 'dashboard' and scheduled_for < now() - interval '10 minutes'` |
+| Notifications that gave up | `select * from notifications where status = 'failed' order by created_at desc` |
+| Notifications stuck mid-send | `select * from notifications where status = 'sending' and updated_at < now() - interval '10 minutes'` |
 | Overdue handovers | `select * from handover_queue where sla_breached` |
 | Undelivered SMS | `select * from messages where status in ('failed','undelivered')` |
 | Spend per tenant | `select business_id, sum(ai_cost_usd), sum(messaging_cost_usd) from analytics_daily where day >= current_date - 30 group by 1` |

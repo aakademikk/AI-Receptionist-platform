@@ -96,6 +96,13 @@ Every webhook handler falls back to calling the internal API directly when
 local development, and it means a n8n outage degrades to "no retries" rather
 than "no service".
 
+The exception is the notification outbox. Enqueueing happens inline, but
+delivery needs something to call `/notifications/drain` on a schedule, and the
+webhook fallback does not do that. Without n8n workflow 09, run
+`scripts/systemd/atwood-notify-drain.timer` (see `docs/06-deployment.md`);
+with neither, every owner alert waits in `notifications` at `attempts = 0` and
+is never sent.
+
 ---
 
 ## Multi-tenancy
