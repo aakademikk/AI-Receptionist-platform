@@ -1,0 +1,19 @@
+[Unit]
+Description=Atwood — drain the notification outbox once
+Documentation=file:/home/col/receptionist-platform/docs/incidents/2026-09-26-owner-alerts-never-sent.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/col/receptionist-platform
+
+# The tarball Node, as in atwood-relay.service: the system one is too old for
+# process.loadEnvFile and is not what the rest of the platform runs on.
+ExecStart=/home/col/.local/node/bin/node scripts/drain-notifications.mjs
+
+# A drain that hangs must not hold the next tick back for ever.
+TimeoutStartSec=150
+
+NoNewPrivileges=yes
+PrivateTmp=yes

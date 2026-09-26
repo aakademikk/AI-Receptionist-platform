@@ -1,0 +1,13 @@
+[Unit]
+Description=Atwood — drain the notification outbox every minute
+
+[Timer]
+# Every minute, the same cadence as n8n workflow 09. Both may run: the claim uses
+# FOR UPDATE SKIP LOCKED, so they take disjoint batches rather than double-sending.
+OnCalendar=minutely
+AccuracySec=5s
+# Deliberately no Persistent=true: a missed tick needs no catching up, the next
+# one drains whatever is due.
+
+[Install]
+WantedBy=timers.target
