@@ -1,13 +1,21 @@
 [Unit]
-Description=Atwood — drain the notification outbox every minute
+Description=Atwood Receptionist — drain the notification outbox every minute
+Documentation=file:/home/col/.local/bin/atwood-notification-drain.sh
 
 [Timer]
-# Every minute, the same cadence as n8n workflow 09. Both may run: the claim uses
-# FOR UPDATE SKIP LOCKED, so they take disjoint batches rather than double-sending.
-OnCalendar=minutely
-AccuracySec=5s
-# Deliberately no Persistent=true: a missed tick needs no catching up, the next
-# one drains whatever is due.
+# Every minute, which is what the n8n workflow this replaces was set to. An owner
+# alert about a missed call is worth nothing an hour later, and the drain is a
+# single indexed claim against a table that is usually empty.
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+# Catch up after the machine has been off. The alert still matters — a lead
+# captured overnight is a lead to ring in the morning — and the claim is
+# idempotent, so a missed window costs nothing but the delay.
+Persistent=true
+
+Unit=atwood-notify-drain.service
 
 [Install]
 WantedBy=timers.target

@@ -116,19 +116,27 @@ the webhook ones need their URLs registered with Twilio (below).
 
 Owner alerts are queued whether or not n8n runs, but they are only sent when
 something calls `POST /api/internal/v1/notifications/drain`. Workflow 09 does
-that every minute. On a box without it, install the systemd user timer instead:
+that every minute. The live box does not use it: since 2026-09-16 it runs the
+systemd user timer in `scripts/systemd/`, which calls the local app every
+minute. These files are copies of the installed ones, so keep the two in step.
 
 ```bash
+install -m 750 scripts/atwood-notification-drain.sh ~/.local/bin/
 cp scripts/systemd/atwood-notify-drain.{service,timer} ~/.config/systemd/user/
 systemctl --user daemon-reload
-node scripts/drain-notifications.mjs --limit 1   # one row, by hand, first
+systemctl --user start atwood-notify-drain.service   # one drain, by hand, first
+journalctl --user -u atwood-notify-drain.service -n 5
 systemctl --user enable --now atwood-notify-drain.timer
-journalctl --user -u atwood-notify-drain.service -n 20
 ```
 
-Running both is safe (the claim skips locked rows), but one is enough. Before the
-first drain on a box that has been running without one, look at the backlog:
-every row in it will be sent, however old. See
+The unit reads the web app's env file for `INTERNAL_API_SECRET` and talks to
+`http://127.0.0.1:3001` via `ATWOOD_DRAIN_URL` (deliberately not
+`ATWOOD_API_URL`, which points at the n8n container's host alias). A drain that
+cannot reach the app exits 0 on purpose: the timer retries in a minute.
+
+Running both drainers is safe (the claim skips locked rows), but one is enough.
+Before the first drain on a box that has been running without one, look at the
+backlog: every row in it will be sent, however old. See
 `docs/incidents/2026-09-26-owner-alerts-never-sent.md`.
 
 ---

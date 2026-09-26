@@ -1,19 +1,28 @@
 [Unit]
-Description=Atwood — drain the notification outbox once
-Documentation=file:/home/col/receptionist-platform/docs/incidents/2026-09-26-owner-alerts-never-sent.md
+Description=Atwood Receptionist — drain the notification outbox
+Documentation=file:/home/col/receptionist-platform/n8n/workflows/09-notification-engine.json
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/col/receptionist-platform
 
-# The tarball Node, as in atwood-relay.service: the system one is too old for
-# process.loadEnvFile and is not what the rest of the platform runs on.
-ExecStart=/home/col/.local/node/bin/node scripts/drain-notifications.mjs
+# The same env file the web app and the relay read.
+#
+# Same reasoning as atwood-relay.service: the shared secret this sends must be the
+# one the API validates against, and a second copy of it is a drift waiting to
+# happen. systemd reads the file itself, so the value never passes through a shell
+# and never reaches a log.
+EnvironmentFile=/home/col/receptionist-platform/apps/web/.env.local
+Environment=ATWOOD_DRAIN_URL=http://127.0.0.1:3001
+Environment=ATWOOD_DRAIN_LIMIT=25
 
-# A drain that hangs must not hold the next tick back for ever.
-TimeoutStartSec=150
+ExecStart=/home/col/.local/bin/atwood-notification-drain.sh
+
+# A drain that cannot reach the app is a normal condition during a web-app restart,
+# not an incident. The timer will try again in a minute; failing loudly every time
+# would train us to ignore the log.
+SuccessExitStatus=0
 
 NoNewPrivileges=yes
 PrivateTmp=yes

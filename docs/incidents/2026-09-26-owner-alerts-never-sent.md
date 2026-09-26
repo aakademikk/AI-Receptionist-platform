@@ -1,8 +1,24 @@
 # Owner-alert emails queued but never sent
 
+> **Resolution, verified on the live box on 2026-09-26. Read this first.**
+> The report below was written from code alone, and its picture of the live box
+> was out of date. The outage was real, but it ended on **2026-09-16**, when a
+> systemd drainer was installed on the box (`atwood-notify-drain.timer` →
+> `atwood-notification-drain.sh`, every minute). The one long-waiting email, a
+> `handover_required` enqueued on 2026-08-17, was sent on 2026-09-16 after two
+> attempts. On 2026-09-26 every email row (15) was `sent`, none were pending,
+> and the timer's runs were returning `claimed: 0`.
+>
+> The real gap was that the working drainer lived only on the box. Its script and
+> units are now in the repo (`scripts/atwood-notification-drain.sh`,
+> `scripts/systemd/`). They replace the `drain-notifications.mjs` version first
+> proposed here, whose units had the same names and would have overwritten the
+> live ones. **Do not run §4b (nothing to suppress) or §4d as written.** §1's
+> code analysis and §5's two findings still stand.
+
 **Reported:** 2026-09-26. On the live box, nine owner-alert email rows in
-`public.notifications` for tenant VOLTA are `status = 'pending'` with
-`attempts = 0`; the oldest is 29 days old.
+`public.notifications` for tenant VOLTA were said to be `status = 'pending'` with
+`attempts = 0`, the oldest 29 days old. (Not so by 2026-09-26; see above.)
 
 **Method:** reasoned from code, migrations and config only. The live database,
 the live n8n instance and the box's systemd units were not reachable. Every
@@ -121,12 +137,12 @@ nothing in the code sets one; confirm with the first query below.
 
 - `n8n/workflows/09-notification-engine.json` — `neverError` removed, so a
   failed drain request fails the execution and is kept in n8n's history.
-- `scripts/drain-notifications.mjs` — drains once via the same route, exits
-  non-zero if the route is unreachable, refuses the secret, or does not answer
-  JSON.
-- `scripts/systemd/atwood-notify-drain.{service,timer}` — runs it every minute
-  as a user unit, in the same shape as `atwood-relay.service`. Safe alongside
-  workflow 09: the claim uses `FOR UPDATE SKIP LOCKED`.
+- `scripts/atwood-notification-drain.sh` and
+  `scripts/systemd/atwood-notify-drain.{service,timer}`: the drainer that has
+  run on the live box since 2026-09-16, committed as-is so it is under version
+  control. (A `drain-notifications.mjs` alternative was written first, then
+  dropped in favour of the proven one.) Safe alongside workflow 09: the claim
+  uses `FOR UPDATE SKIP LOCKED`.
 - `docs/00-architecture.md`, `.env.example`, `docs/06-deployment.md` — say
   plainly that notification delivery needs one of the two drainers, and replace
   the monitoring query with ones that catch never-attempted, failed and
@@ -180,8 +196,9 @@ attempts and marks each row `failed`.
 
 **d. Start one drainer.** Either re-import and activate workflow 09, or install
 the systemd timer (`docs/06-deployment.md`, "Delivering notifications without
-n8n"). Run `node scripts/drain-notifications.mjs --limit 1` by hand first and
-check the result line.
+n8n"). Run `systemctl --user start atwood-notify-drain.service` by hand first
+and check the result line in the journal. (On the live box this is already
+done; see the resolution at the top.)
 
 **e. Prove it end to end.** Trigger one real owner alert (a missed call to the
 VOLTA number is the simplest), then within two minutes:
