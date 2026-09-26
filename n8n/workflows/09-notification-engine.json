@@ -22,14 +22,14 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ limit: 50 }) }}",
-        "options": { "timeout": 120000, "response": { "response": { "neverError": true, "responseFormat": "json" } } }
+        "options": { "timeout": 120000, "response": { "response": { "responseFormat": "json" } } }
       },
       "id": "drain",
       "name": "Drain the outbox",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [0, 0],
-      "notes": "Claims a batch with FOR UPDATE SKIP LOCKED, so overlapping runs take disjoint batches rather than double-sending. That makes a slow run safe to overlap with the next tick — no lock file, no singleton flag."
+      "notes": "Claims a batch with FOR UPDATE SKIP LOCKED, so overlapping runs take disjoint batches rather than double-sending. That makes a slow run safe to overlap with the next tick — no lock file, no singleton flag.\n\nA non-2xx response fails this node on purpose. With neverError set, a 401 (secret mismatch), a 404 (wrong ATWOOD_API_URL) or a 502 (app down) came back as a body with no `failed` field, took the 'Clean run' branch, and — with successful executions not saved — left no trace anywhere while the outbox filled with rows at attempts = 0."
     },
     {
       "parameters": {
