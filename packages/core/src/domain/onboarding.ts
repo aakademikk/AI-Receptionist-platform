@@ -466,8 +466,8 @@ async function loadExtractionSettings(
   const settings = data as { extraction_provider: string; extraction_model: string } | null;
 
   return {
-    provider: (settings?.extraction_provider ?? 'anthropic') as 'anthropic' | 'openai' | 'google',
-    model: settings?.extraction_model ?? 'claude-opus-5-5',
+    provider: (settings?.extraction_provider ?? 'google') as 'anthropic' | 'openai' | 'google',
+    model: settings?.extraction_model ?? 'gemini-3.8-flash',
   };
 }
 

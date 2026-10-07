@@ -128,7 +128,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
           <Field label="Reply provider">
             <Select
               name="ai_provider"
-              defaultValue={String(settings?.['ai_provider'] ?? 'anthropic')}
+              defaultValue={String(settings?.['ai_provider'] ?? 'google')}
               disabled={!editable}
               options={[
                 ['anthropic', 'Claude (Anthropic)'],
@@ -138,14 +138,14 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
             />
           </Field>
 
-          <Field label="Reply model" hint="Exact model id, e.g. claude-opus-5-5">
+          <Field label="Reply model" hint="Exact model id, e.g. gemini-3.8-flash">
             <Input name="ai_model" defaultValue={String(settings?.['ai_model'] ?? '')} disabled={!editable} />
           </Field>
 
           <Field label="Extraction provider">
             <Select
               name="extraction_provider"
-              defaultValue={String(settings?.['extraction_provider'] ?? 'anthropic')}
+              defaultValue={String(settings?.['extraction_provider'] ?? 'google')}
               disabled={!editable}
               options={[
                 ['anthropic', 'Claude (Anthropic)'],

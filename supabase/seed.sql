@@ -199,8 +199,8 @@ update public.business_profiles set
 where business_id = '10000000-0000-4000-8000-000000000001';
 
 update public.business_settings set
-  ai_provider = 'anthropic',
-  ai_model = 'claude-opus-5',
+  ai_provider = 'google',
+  ai_model = 'gemini-3.8-flash',
   ai_effort = 'low',
   missed_call_template = 'Hi, thanks for contacting {{business_name}}. We''re sorry we missed your call. How can we help today?',
   after_hours_template = 'Thanks for contacting {{business_name}}. Our office is closed right now, but tell me what you need and I''ll make sure someone picks it up first thing.',

@@ -49,6 +49,14 @@ begin
                  where business_id = 'aaaaaaaa-0000-0000-0000-000000000001') then
     raise exception 'FAIL: business_settings was not auto-provisioned';
   end if;
+  -- New businesses start on the model the live tenants use (Colin, 2026-10-07:
+  -- Gemini 3.8 Flash replaced Opus because it is quicker), not the old Opus id.
+  if not exists (select 1 from public.business_settings
+                 where business_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+                   and ai_provider = 'google' and ai_model = 'gemini-3.8-flash'
+                   and extraction_provider = 'google' and extraction_model = 'gemini-3.8-flash') then
+    raise exception 'FAIL: a new business does not default to google / gemini-3.8-flash';
+  end if;
 end;
 $$;
 
