@@ -467,7 +467,7 @@ async function loadExtractionSettings(
 
   return {
     provider: (settings?.extraction_provider ?? 'anthropic') as 'anthropic' | 'openai' | 'google',
-    model: settings?.extraction_model ?? 'claude-opus-5',
+    model: settings?.extraction_model ?? 'claude-opus-5-5',
   };
 }
 

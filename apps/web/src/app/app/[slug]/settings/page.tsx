@@ -138,7 +138,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ slug:
             />
           </Field>
 
-          <Field label="Reply model" hint="Exact model id, e.g. claude-opus-5">
+          <Field label="Reply model" hint="Exact model id, e.g. claude-opus-5-5">
             <Input name="ai_model" defaultValue={String(settings?.['ai_model'] ?? '')} disabled={!editable} />
           </Field>
 
