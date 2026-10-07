@@ -19,9 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No version here: package.json's "packageManager" pins pnpm, and the action
+      # refuses to run when both are set (every run failed on it from 2026-09-26).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -62,12 +62,18 @@ jobs:
         # Runs as the postgres user because initdb refuses to run as root.
         # REQUIRE_VECTOR=1 fails rather than degrading — CI has pgvector, so a
         # missing extension here would mean the install step silently broke.
+        # The postgres user cannot enter /home/runner, so chmod on the workspace
+        # alone left the script unreadable ("Permission denied", exit 126). The
+        # suite runs from a copy in a temp dir it can read; validate_local.sh finds
+        # the migrations relative to itself, so the copy is self-contained.
         run: |
-          sudo chmod -R a+rX "$GITHUB_WORKSPACE"
+          T=$(mktemp -d)
+          cp -r "$GITHUB_WORKSPACE/supabase" "$T/"
+          chmod -R a+rX "$T"
           sudo -u postgres env \
             PGBIN=/usr/lib/postgresql/16/bin \
             REQUIRE_VECTOR=1 \
-            bash "$GITHUB_WORKSPACE/supabase/tests/validate_local.sh"
+            bash "$T/supabase/tests/validate_local.sh"
 
   workflows:
     name: n8n workflow JSON
