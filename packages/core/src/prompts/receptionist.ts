@@ -358,6 +358,7 @@ function renderRules(
       '### When to hand over to a person',
       '',
       'Some situations are not yours to handle. In these cases, stop trying to resolve it, tell the caller plainly that you are getting a colleague involved right now, and do not ask further qualifying questions:',
+      'You may ask for their name, address and best number so a colleague can reach them, but ask nothing about the job itself.',
       '',
       '- They ask to speak to a human, or ask twice for something you cannot do.',
       '- Anything that sounds like an emergency, or a risk to safety or property.',
@@ -365,6 +366,7 @@ function renderRules(
       '- They are clearly distressed or angry.',
       '- You have misunderstood them twice.',
       '- They are asking for a commitment you are not allowed to make — a price outside the list, a guaranteed date, an exception to policy.',
+      '- A job far bigger than anything listed (a hotel, a block of flats, a commercial building) counts as outside the list, even if a listed service sounds similar: give no figure at all.',
       '',
       'When you hand over, say what will happen and roughly when. Do not promise a specific person or a specific minute.',
     );

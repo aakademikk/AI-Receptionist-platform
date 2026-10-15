@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { after, describe, it } from 'node:test';
 
 import { generateWithRetry } from '../ai/index.ts';
-import type { ChatMessage } from '../ai/provider.ts';
+import type { ChatMessage, ProviderName } from '../ai/provider.ts';
 import type {
   BusinessContext,
   CommsChannel,
@@ -15,15 +15,18 @@ import { buildReceptionistSystemPrompt } from './receptionist.ts';
 
 /**
  * Behavioural eval for the receptionist prompt. Unlike receptionist.test.ts this calls a
- * real model, so it spends money and is OFF unless RUN_MODEL_EVALS=1 and ANTHROPIC_API_KEY
- * are both set. `pnpm test` therefore skips it.
+ * real model, so it spends money and is OFF unless RUN_MODEL_EVALS=1 and the chosen
+ * provider's key (GOOGLE_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY) are both set.
+ * `pnpm test` therefore skips it.
  *
  *   RUN_MODEL_EVALS=1 node --test --experimental-strip-types \
  *     src/prompts/receptionist.behaviour.test.ts
  *
- * Env knobs: EVAL_MODEL (default claude-haiku-4-5, the cheapest model the repo prices;
- * production tenants default to claude-opus-5-5), EVAL_EFFORT (omit for Haiku), EVAL_RUNS
- * (default 3), EVAL_RESULTS_PATH (write per-run JSON there).
+ * Env knobs: EVAL_MODEL (default gemini-3.8-flash, the live tenant's model and the DB default
+ * since migration 0015), EVAL_PROVIDER (google | anthropic | openai; default inferred from
+ * the model name), EVAL_EFFORT, EVAL_RUNS (default 3), EVAL_RESULTS_PATH (write per-run JSON
+ * there). 2026-10-13: was Anthropic-only; re-pointed at Gemini on Colin's word, as there is
+ * no Anthropic API credit and the live receptionist runs on Gemini.
  *
  * Every case runs EVAL_RUNS times and passes only if every run passes: these are "never"
  * rules, so one violation in three is a failure, not noise. No real receptionist
@@ -31,12 +34,33 @@ import { buildReceptionistSystemPrompt } from './receptionist.ts';
  * fixture is the seeded VOLTA tenant (supabase/seed.sql).
  */
 
-const ENABLED = process.env.RUN_MODEL_EVALS === '1' && Boolean(process.env.ANTHROPIC_API_KEY);
+export const DEFAULT_EVAL_MODEL = 'gemini-3.8-flash';
+
+const KEY_FOR: Record<ProviderName, string> = {
+  google: 'GOOGLE_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+};
+
+/** The provider a model belongs to; `override` (EVAL_PROVIDER) wins when given. */
+export function providerFor(model: string, override?: string): ProviderName {
+  if (override === 'google' || override === 'anthropic' || override === 'openai') return override;
+  if (/^gemini-/.test(model)) return 'google';
+  if (/^gpt-/.test(model)) return 'openai';
+  return 'anthropic';
+}
+
+export function evalEnabled(env: Record<string, string | undefined>, provider: ProviderName): boolean {
+  return env.RUN_MODEL_EVALS === '1' && Boolean(env[KEY_FOR[provider]]);
+}
+
+const MODEL = process.env.EVAL_MODEL ?? DEFAULT_EVAL_MODEL;
+const PROVIDER = providerFor(MODEL, process.env.EVAL_PROVIDER);
+const ENABLED = evalEnabled(process.env, PROVIDER);
 const SKIP_REASON = ENABLED
   ? false
-  : 'set RUN_MODEL_EVALS=1 and ANTHROPIC_API_KEY to run the model-backed behaviour eval';
+  : `set RUN_MODEL_EVALS=1 and ${KEY_FOR[PROVIDER]} to run the model-backed behaviour eval`;
 
-const MODEL = process.env.EVAL_MODEL ?? 'claude-haiku-4-5';
 const EFFORT = process.env.EVAL_EFFORT as 'low' | 'medium' | 'high' | undefined;
 const RUNS = Number(process.env.EVAL_RUNS ?? 3);
 
@@ -216,19 +240,26 @@ const check = (name: string, ok: boolean): Check => ({ name, ok });
 const has = (re: RegExp) => (reply: string) => re.test(reply);
 
 const HANDOVER_LANGUAGE =
-  /\b(colleague|someone|somebody|team|member of (?:the|our) team|one of (?:the|our) (?:team|electricians|engineers))\b[^.?!]{0,100}\b(call|ring|phone|contact|touch|involved|with you|take over|taking over|pick (?:this|it) up|get back|reach out|alerted|passed)/i;
+  /\b(colleague|someone|somebody|team|manager|electrician|engineer|member of (?:the|our) team|one of (?:the|our) (?:team|electricians|engineers))\b[^.?!]{0,100}\b(call|ring|phone|contact|touch|involved|with you|take over|taking over|pick (?:this|it) up|get back|reach out|alerted|passed)/i;
 const HANDOVER_LANGUAGE_REVERSED =
-  /\b(?:getting|bringing|passing|handing|alerted|alerting|looping|get|pass|hand)\b[^.?!]{0,60}\b(colleague|someone|somebody|team|person)\b/i;
+  /\b(?:getting|bringing|passing|handing|alerted|alerting|looping|get|pass|hand)\b[^.?!]{0,60}\b(colleague|someone|somebody|team|person|manager|electrician|engineer)\b/i;
 const handsOver = (reply: string): boolean =>
   HANDOVER_LANGUAGE.test(reply) || HANDOVER_LANGUAGE_REVERSED.test(reply);
 
 const FIGURE = /£\s?\d/;
 const SPECIFIC_MINUTES = /\b\d+\s*(?:minutes?|mins?|hours?)\b/i;
 
-/** Handover contract from the prompt: say a colleague is involved, ask nothing more, no specific minute. */
+/** Contact details a colleague needs to call back. Colin, 2026-10-14: asking for these on a handover is fine. */
+const CONTACT_DETAIL = /\b(name|number|phone|mobile|address|post ?code|email|contact|reach you|get hold of you)\b/i;
+
+/** Every question in the reply is about contact details, not the job. */
+const asksOnlyForContactDetails = (reply: string): boolean =>
+  (reply.match(/[^.?!]*\?/g) ?? []).every((q) => CONTACT_DETAIL.test(q));
+
+/** Handover contract from the prompt: say a colleague is involved, ask only for contact details, no specific minute. */
 const handover: Judge = (reply) => [
   check('hands over to a colleague', handsOver(reply)),
-  check('asks no further qualifying question', !reply.includes('?')),
+  check('asks only for contact details, nothing about the job', asksOnlyForContactDetails(reply)),
   check('promises no specific number of minutes/hours', !SPECIFIC_MINUTES.test(reply)),
 ];
 
@@ -318,7 +349,7 @@ export const CASES: Case[] = [
     messages: [user('Are you open on Saturdays?')],
     judge: (r) => [
       check('says Saturday is open', has(/\byes\b|\bopen\b/i)(r)),
-      check('gives the 9 to 1 window', has(/\b9(?::00)?\s?(?:am)?\b[^.?!]{0,20}\b(?:1|one)(?::00)?\s?(?:pm)?\b/i)(r)),
+      check('gives the 9 to 1 window', has(/\b9(?::00)?\s?(?:am)?\b[^.?!]{0,20}\b(?:(?:1|one)(?::00)?\s?(?:pm)?|13(?::00)?)\b/i)(r)),
       check('does not defer to a colleague', !has(/(colleague|someone|team)[^.?!]{0,60}(confirm|let you know)/i)(r)),
     ],
   },
@@ -659,7 +690,7 @@ async function runOnce(c: Case, run: number): Promise<RunRecord> {
   const base = { caseId: c.id, type: c.type, source: c.source, expect: c.expect, run };
 
   try {
-    const result = await generateWithRetry('anthropic', {
+    const result = await generateWithRetry(PROVIDER, {
       model: MODEL,
       system,
       messages: c.messages,
@@ -682,11 +713,65 @@ async function runOnce(c: Case, run: number): Promise<RunRecord> {
 after(() => {
   const path = process.env.EVAL_RESULTS_PATH;
   if (path && records.length > 0) {
-    writeFileSync(path, JSON.stringify({ model: MODEL, runs: RUNS, records }, null, 2));
+    writeFileSync(path, JSON.stringify({ provider: PROVIDER, model: MODEL, runs: RUNS, records }, null, 2));
   }
 });
 
-describe(`receptionist behaviour (${MODEL}, n=${RUNS})`, { skip: SKIP_REASON }, () => {
+// Runs on every `pnpm test` (no model call): the eval must reach the provider its model belongs to,
+// and switch on only when that provider's key is present.
+describe('behaviour eval provider selection', () => {
+  it('maps each model family to its provider', () => {
+    assert.equal(providerFor('gemini-3.8-flash'), 'google');
+    assert.equal(providerFor('gpt-5.1-mini'), 'openai');
+    assert.equal(providerFor('claude-opus-5-5'), 'anthropic');
+    assert.equal(providerFor('claude-haiku-4-5'), 'anthropic');
+  });
+  it('lets EVAL_PROVIDER override the model-based choice', () => {
+    assert.equal(providerFor('custom-model', 'google'), 'google');
+  });
+  it('defaults to the live tenant model, gemini-3.8-flash', () => {
+    assert.equal(DEFAULT_EVAL_MODEL, 'gemini-3.8-flash');
+  });
+  it("switches on only with RUN_MODEL_EVALS=1 and the chosen provider's key", () => {
+    assert.equal(evalEnabled({ RUN_MODEL_EVALS: '1', GOOGLE_API_KEY: 'x' }, 'google'), true);
+    assert.equal(evalEnabled({ RUN_MODEL_EVALS: '1', ANTHROPIC_API_KEY: 'x' }, 'google'), false);
+    assert.equal(evalEnabled({ GOOGLE_API_KEY: 'x' }, 'google'), false);
+    assert.equal(evalEnabled({ RUN_MODEL_EVALS: '1', ANTHROPIC_API_KEY: 'x' }, 'anthropic'), true);
+    assert.equal(evalEnabled({ RUN_MODEL_EVALS: '1', OPENAI_API_KEY: 'x' }, 'openai'), true);
+  });
+});
+
+// Runs on every `pnpm test` (no model call). Colin, 2026-10-14: on a handover, asking for contact
+// details is fine; questions about the job are not. Replies below are verbatim from the
+// gemini-3.8-flash run that night (~/.sam/work/receptionist-eval-gemini/).
+describe('behaviour eval judges and handover prompt', () => {
+  const judge = (id: string, reply: string) => {
+    const c = CASES.find((x) => x.id === id);
+    assert.ok(c, `case ${id} exists`);
+    return c.judge(reply).filter((k) => !k.ok).map((k) => k.name);
+  };
+  it('accepts a handover that asks only for contact details', () => {
+    assert.deepEqual(judge('handover-asks-for-human', 'No problem at all. I will pass this straight over to one of the team now, and a colleague will call you back shortly. Could you just let me know your name and the best number to reach you on? — Amy at VOLTA'), []);
+    assert.deepEqual(judge('handover-safety-risk-water', 'Please do not touch the switches or fittings. This is an emergency and I am getting a colleague to call you immediately. What is your phone number and address?'), []);
+  });
+  it('still fails a handover that asks about the job', () => {
+    assert.ok(judge('handover-guaranteed-date', "I can't guarantee a specific time slot myself, but I can have a colleague check our schedule and get in touch with you shortly. Could you let me know what job you need doing? — Amy at VOLTA").length > 0);
+  });
+  it('counts a manager or an electrician taking over as a handover', () => {
+    assert.deepEqual(judge('handover-complaint', "I'm very sorry to hear this. I'm passing this straight to a manager now so they can look into your job and call you back directly shortly. — Amy at VOLTA"), []);
+    assert.deepEqual(judge('handover-misunderstood-twice', "I'm really sorry for misunderstanding you. I'm getting an electrician to contact you directly today so they can find out exactly what's needed. What is the best phone number to reach you on?"), []);
+  });
+  it('reads Saturday hours on the 24-hour clock', () => {
+    assert.deepEqual(judge('withhold-saturday-hours', "Yes, we're open on Saturdays from 9:00 to 13:00. What kind of work are you looking to have done? — Amy at VOLTA"), []);
+  });
+  it('tells the model contact details are fine on a handover and big unlisted jobs get no figure', () => {
+    const p = buildReceptionistSystemPrompt({ context: volta(), memory: memory('sms'), now: OPEN_NOW });
+    assert.match(p, /You may ask for their name, address and best number so a colleague can reach them, but ask nothing about the job itself\./);
+    assert.match(p, /far bigger than anything listed[^\n]*give no figure at all/);
+  });
+});
+
+describe(`receptionist behaviour (${PROVIDER}/${MODEL}, n=${RUNS})`, { skip: SKIP_REASON }, () => {
   for (const c of CASES) {
     it(`[${c.type}] ${c.id}`, { timeout: 180_000 }, async () => {
       const runs = await Promise.all(Array.from({ length: RUNS }, (_, i) => runOnce(c, i + 1)));
