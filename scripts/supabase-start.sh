@@ -55,4 +55,21 @@ fi
 
 echo "supabase-start: ${#REQUIRED[@]} variables present; starting the stack"
 cd "$ROOT"
-exec npx --yes supabase@2.110.0 start "$@"
+# No `exec`: the port check below has to run after the stack is up.
+npx --yes supabase@2.110.0 start "$@"
+
+# Guard (2026-10-16, LAN exposure): Docker publishes on 0.0.0.0 by default and that
+# bypasses ufw, which left Postgres and Studio open to the wifi from 17 Sep. The
+# durable fix is "ip": "127.0.0.1" in /etc/docker/daemon.json; this catches the day
+# that file is lost (a Docker reinstall, say). Fail loudly rather than carry on.
+if ! ports=$(docker ps --filter "label=com.supabase.cli.project=atwood-systems" --format '{{.Ports}}'); then
+  echo "supabase-start: could not read container ports from docker, so the loopback check did not run" >&2
+  exit 1
+fi
+if grep -qE '(^|[ ,])(0\.0\.0\.0|\[::\]):' <<< "$ports"; then
+  echo "supabase-start: ports published beyond loopback (0.0.0.0 or [::]):" >&2
+  grep -oE '(0\.0\.0\.0|\[::\]):[0-9]+' <<< "$ports" | sort -u | sed 's/^/  /' >&2
+  echo 'Anything on the wifi can reach these. Set "ip": "127.0.0.1" in /etc/docker/daemon.json and restart Docker.' >&2
+  exit 1
+fi
+echo "supabase-start: all published ports are on loopback"
