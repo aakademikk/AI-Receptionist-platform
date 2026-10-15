@@ -195,7 +195,7 @@ sockets.on('connection', (ws: WebSocket) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, process.env.RELAY_HOST ?? '127.0.0.1', () => {
   logger.info('Relay listening', {
     port: PORT,
     // The public URL is derived per-connection from the upgrade request's host, so there
