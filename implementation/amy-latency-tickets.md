@@ -287,10 +287,50 @@ Steps:
 Do not touch: `main`, any deploy, any env file, the systemd unit.
 Proof: before, `git log -1` is `13da8b4`. After: `git log --oneline 13da8b4..HEAD` shows the step 1 commit(s); suites green with counts.
 
+## T9b: callSid on every relay event, a session_end on hang-up, stats join on callSid, and the no-finish-reason stream guard
+Status: DONE 2026-10-17 (core 262, relay 74, typechecks clean, stats test passes; before-run failed as expected)
+Spec: must-do 2 and 5 (trustworthy per-call joins), must-do 4 (streamed result equals the whole one); added 2026-10-17 by SAM with
+Colin's yes, from the step 1 build report point 4 and review findings 1, 3 and 4 (`/home/col/.sam/work/amy-latency/step1-review.md`)
+Depends on: T9
+Blocked by: none
+Context (review finding 1): `packages/core/src/ai/google.ts:118` to `:143` accepts whatever text has arrived when the stream ends, even
+if no chunk carried a `finishReason`, giving `stopReason: null, truncated: false`, so the caller would hear half a sentence as a whole
+reply. The whole-response path cannot do this. Guard: after the loop, if no finish reason arrived and the text is non-empty, throw a
+retryable `ProviderError` (message `stream ended without finish reason`) through the same path as other provider errors.
+Context (callSid): Only `setup` and `turn_first_frame` carry `callSid` (not `probe_frame` or `probe_interrupt` either). Every other relay event (`prompt_final`,
+`turn_superseded`, `interrupt`, `reply_cut_off`, `turn_answered`, ...) lacks it, so `latency-stats.mjs` attributes them to the most
+recent `setup`, which mixes up two concurrent calls. A caller hanging up never logs `session_end` (live journal: 5 setups, 0 session_end):
+`server.ts`'s `ws.on('close')` logs `Relay socket closed` without `callSid` or a session end. Fix both before T10 so the step 1
+evidence and every later figure join on `callSid`. Logging only; no frame, timing or reply changes.
+Files: apps/relay/src/protocol.ts (edit), apps/relay/src/protocol.test.ts (edit), apps/relay/src/server.ts (edit),
+~/.sam/work/amy-latency/latency-stats.mjs (edit), ~/.sam/work/amy-latency/latency-stats.test.mjs (edit),
+~/.sam/work/amy-latency/fixtures/ (edit or add a sample), packages/core/src/ai/google.ts (edit), packages/core/src/ai/google.test.ts (edit)
+Steps:
+0. `google.ts`: the no-finish-reason guard above. `google.test.ts`: a sixth fixture, text split into 1, 2 and 5 chunks with no
+   `finishReason` on any chunk, expects the retryable `ProviderError`; the five existing equivalence fixtures still pass unchanged.
+1. `protocol.ts`: wrap `onEvent` once in the `RelaySession` constructor so every event carries `callSid` once `setup` has been seen
+   (`{ callSid: this.call?.callSid ?? null, ...fields }`, so fields already carrying `callSid` keep theirs; review finding 3). Update the
+   exact-fields assertion for `probe_frame` (`protocol.test.ts:827`). Add a read-only `callSid` getter and a `turnCount` getter on `RelaySession`.
+2. `server.ts`: `Relay socket closed` gains `callSid` and `turns`. When the session did not end itself (`!session.isEnded`), log one
+   `Relay call event` with `event: 'session_end'`, `reason: 'socket_closed'`, `callSid`, `turns`, `code`. Nothing else in the close handler changes.
+3. `latency-stats.mjs`: join on `callSid` when an event has it; keep the last-`setup` attribution only as the fallback for old journal
+   lines without it, and print how many events used the fallback. Count `session_end` with reason `socket_closed` as an ordinary end.
+   Review finding 4: the `reasons.unattributable` column (`latency-stats.mjs:166`, printed at `:386`) is never incremented; point it at
+   the real unattributable-events counter or remove it, and make the test check the printed figure.
+4. Tests: relay, every event emitted after `setup` in an existing scripted call carries the call's `callSid`, and events before `setup`
+   carry none; a fake socket close without an end logs one `session_end` `socket_closed`. Stats, a fixture with two interleaved
+   calls (events alternating) attributes every turn to the right call and reports 0 fallback events; the old fixture still passes
+   and reports its fallback count.
+Do not touch: frames sent, timings, barge-in, silence backstop, probe behaviour, any core file other than `google.ts` and
+`google.test.ts`, the whole (non-streamed) Gemini path, `generateWithRetry`, the env file, the systemd unit.
+Proof: before, the no-finish-reason fixture, the interleaved-calls stats test and the relay callSid test fail. After: all pass; relay
+green with count (71 + new); core green with count (259 + new); core and relay typecheck clean; `latency-stats.mjs --since 2026-10-01` still runs on the live journal and prints the
+fallback count. Commit on `restyle/glassmorphism` (subject starting `Amy latency step 1b:`), not pushed.
+
 ## T10: GATE: deploy step 1 to the live relay and collect the step 1 evidence (Colin's go)
 Status: TODO
 Spec: must-do 5; Done-means 4; decisions 2, 3, 8 (live), 9 (before figure)
-Depends on: T3, T7, T8, T9
+Depends on: T3, T7, T8, T9, T9b
 Blocked by: Colin's go to deploy (SAM asks; no go, no deploy)
 Context: Live production (the VOLTA demo tenant) runs from this checkout through `atwood-relay.service`. A relay restart drops any
 call in progress. The probe is turned on only for the probe calls and off again before the baseline calls.
@@ -769,6 +809,8 @@ no verdict for 5 turns; the next `receptionist-watch.service` run logs the laten
 | Robustness: stall timeout, retry once, abort on barge-in | T13, T18 |
 | Robustness: fallback lines logged at warn or error with reason | T15 |
 | Robustness: alert | T26 |
+| Step 1 build report point 4 (2026-10-17): callSid on every relay event, session_end on hang-up | T9b |
+| Step 1 review findings 1 and 4 (2026-10-17): no-finish-reason stream guard; unattributable column | T9b |
 
 No spec open question is still OPEN: all nine are answered in "Decisions at lock". The live answers to decisions 2, 3 and 8 come from
 T10 and gate step 2 through T11.

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import type { GenerateContentResponse } from '@google/genai';
 
 import { GoogleProvider } from './google.ts';
-import type { GenerateRequest } from './provider.ts';
+import { ProviderError, type GenerateRequest } from './provider.ts';
 
 /**
  * The streamed path must hand back exactly what the whole-response path does. Each
@@ -170,6 +170,31 @@ describe('GoogleProvider streaming', () => {
         assert.equal(streamed.timing.firstTokenMs === null, !hasText);
       });
     }
+  }
+
+  for (const n of [1, 2, 5]) {
+    it(`no finish reason: ${n} chunk(s) of text throws a retryable ProviderError`, async () => {
+      const pieces = ['We can come out on ', 'Tuesday or'];
+      const full = pieces.join('');
+      const size = Math.ceil(full.length / n);
+      const chunks: GenerateContentResponse[] = [];
+      for (let i = 0; i < n; i += 1) {
+        chunks.push({
+          text: full.slice(i * size, (i + 1) * size),
+          candidates: [{}],
+        } as unknown as GenerateContentResponse);
+      }
+      const models = new FakeModels(response(full), chunks);
+      await assert.rejects(
+        () => provider(models).generate({ ...REQUEST, stream: true }),
+        (error: unknown) => {
+          assert.ok(error instanceof ProviderError);
+          assert.equal(error.retryable, true);
+          assert.equal(error.message, 'stream ended without finish reason');
+          return true;
+        },
+      );
+    });
   }
 
   it('folds thinking into completion tokens and splits them out', async () => {

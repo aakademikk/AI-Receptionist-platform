@@ -7,6 +7,7 @@ import {
   SILENCE_PROMPT_MS,
   estimatedSpeechMs,
   parseFrame,
+  reportSocketClose,
   sanitiseForSpeech,
   type InboundFrame,
   type OutboundFrame,
@@ -830,6 +831,7 @@ describe('frame probe', () => {
       frame: 1,
       last: false,
       msSincePromptFinal: 0,
+      callSid: 'CA123',
     });
     assert.ok(names().includes('prompt_final'));
     assert.equal(names().includes('turn_first_frame'), false);
@@ -888,5 +890,65 @@ describe('frame probe', () => {
     session.dispose();
     t.mock.timers.tick(10_000);
     assert.equal(sent.length, 1);
+  });
+});
+
+describe('callSid on every event', () => {
+  it('stamps each event after setup with the call, and none before it', async () => {
+    const { session, events } = sessionWithLog({ reply: says('Of course.', false) });
+
+    await session.handle({ type: 'dtmf', digit: '1' });
+    await session.handle(finalPrompt('hello before setup'));
+    const before = events.length;
+    assert.ok(before >= 2);
+    for (const entry of events) assert.equal(entry.fields.callSid, null, entry.event);
+
+    await session.handle(SETUP);
+    await session.handle({ type: 'prompt', voicePrompt: 'I need', last: false });
+    await session.handle(finalPrompt('a roofer please'));
+    await session.handle({ type: 'interrupt', utteranceUntilInterrupt: 'Of', durationUntilInterruptMs: 100 });
+    await session.handle({ type: 'dtmf', digit: '2' });
+    await session.handle(finalPrompt('thank you'));
+
+    const after = events.slice(before);
+    const names = after.map((entry) => entry.event);
+    for (const wanted of ['setup', 'prompt_partial', 'prompt_final', 'turn_answered', 'dtmf']) {
+      assert.ok(names.includes(wanted), `expected a ${wanted} event`);
+    }
+    for (const entry of after) assert.equal(entry.fields.callSid, 'CA123', entry.event);
+    assert.equal(session.callSid, 'CA123');
+    assert.equal(session.turnCount, 3);
+  });
+});
+
+describe('reportSocketClose', () => {
+  it('logs one socket_closed session_end when the session did not end itself', async () => {
+    const { session } = sessionWithLog({ reply: says('Of course.', false) });
+    await session.handle(SETUP);
+    await session.handle(finalPrompt('hello'));
+    const logged: Array<{ message: string; fields: Record<string, unknown> }> = [];
+    reportSocketClose(session, 1006, '', (message, fields) => logged.push({ message, fields }));
+
+    assert.deepEqual(logged.map((entry) => entry.message), ['Relay socket closed', 'Relay call event']);
+    assert.equal(logged[0]!.fields.callSid, 'CA123');
+    assert.equal(logged[0]!.fields.turns, 1);
+    assert.equal(logged[0]!.fields.endedByUs, false);
+    assert.deepEqual(logged[1]!.fields, {
+      event: 'session_end',
+      reason: 'socket_closed',
+      callSid: 'CA123',
+      turns: 1,
+      code: 1006,
+    });
+  });
+
+  it('logs no second session_end when the session already ended', async () => {
+    const { session } = sessionWithLog({ reply: says('Goodbye.', true) });
+    await session.handle(SETUP);
+    await session.handle(finalPrompt('bye'));
+    assert.equal(session.isEnded, true);
+    const logged: string[] = [];
+    reportSocketClose(session, 1000, '', (message) => logged.push(message));
+    assert.deepEqual(logged, ['Relay socket closed']);
   });
 });

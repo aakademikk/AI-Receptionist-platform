@@ -348,7 +348,10 @@ export class RelaySession {
   constructor(options: RelaySessionOptions = {}) {
     this.maxTurns = options.maxTurns ?? 40;
     this.reply = options.reply ?? NO_REPLY;
-    this.onEvent = options.onEvent ?? (() => {});
+    // Wrapped once so every event names its call as soon as `setup` has been seen (and
+    // carries null before it). A field already named `callSid` keeps its own value.
+    const emit = options.onEvent ?? (() => {});
+    this.onEvent = (event, fields) => emit(event, { callSid: this.call?.callSid ?? null, ...fields });
     this.send = options.send ?? null;
     this.onInterrupted = options.onInterrupted ?? null;
     this.now = options.now ?? Date.now;
@@ -366,6 +369,16 @@ export class RelaySession {
     this.disposed = true;
     this.clearSilenceTimer();
     this.clearProbeTimer();
+  }
+
+  /** The Twilio call this session belongs to, or null before `setup`. */
+  get callSid(): string | null {
+    return this.call?.callSid ?? null;
+  }
+
+  /** How many caller turns this call has had so far. */
+  get turnCount(): number {
+    return this.turns;
   }
 
   /** True once we have told Twilio to end the call. */
@@ -675,5 +688,26 @@ export class RelaySession {
   private clearSilenceTimer(): void {
     if (this.silenceTimer !== null) clearTimeout(this.silenceTimer);
     this.silenceTimer = null;
+  }
+}
+
+/**
+ * Log a closed socket, and a `session_end` when the session did not end itself.
+ *
+ * A caller who hangs up never triggers an end from our side, so without this the journal
+ * has a `setup` and no end. Logging only.
+ */
+export function reportSocketClose(
+  session: RelaySession,
+  code: number,
+  reason: string,
+  log: (message: string, fields: Record<string, unknown>) => void,
+): void {
+  const callSid = session.callSid;
+  const turns = session.turnCount;
+  const endedByUs = session.isEnded;
+  log('Relay socket closed', { code, reason, endedByUs, callSid, turns });
+  if (!endedByUs) {
+    log('Relay call event', { event: 'session_end', reason: 'socket_closed', callSid, turns, code });
   }
 }

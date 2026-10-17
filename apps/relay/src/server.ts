@@ -6,7 +6,7 @@ import { validateTwilioSignature } from '@atwood/core/integrations/twilio';
 import { logger } from '@atwood/core/utils';
 import { WebSocketServer, type WebSocket } from 'ws';
 
-import { RelaySession, parseFrame, type OutboundFrame } from './protocol.ts';
+import { RelaySession, parseFrame, reportSocketClose, type OutboundFrame } from './protocol.ts';
 import { checkSignature } from './signature.ts';
 
 /**
@@ -191,11 +191,7 @@ sockets.on('connection', (ws: WebSocket) => {
      * end. Logging the reason matters because an unexpected close is not retried by
      * Twilio — it ends the call with a `failed` status and nothing else records why.
      */
-    logger.info('Relay socket closed', {
-      code,
-      reason: reason.toString('utf8'),
-      endedByUs: session.isEnded,
-    });
+    reportSocketClose(session, code, reason.toString('utf8'), (message, fields) => logger.info(message, fields));
   });
 });
 

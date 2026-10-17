@@ -140,6 +140,12 @@ export class GoogleProvider implements AiProvider {
       } catch (error) {
         throw toProviderError(error);
       }
+      // A body that closed cleanly part-way through would otherwise be spoken as a whole
+      // reply (no finish reason means the truncation guards never fire). The whole-response
+      // path cannot do this, so treat it as a failed attempt and let the caller retry.
+      if (raw.finishReason === null && raw.text !== '') {
+        throw new ProviderError('google', 'stream ended without finish reason', { retryable: true });
+      }
       const lastTokenMs = Date.now() - started;
       return {
         ...this.buildResult(request, started, raw),
