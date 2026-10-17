@@ -21,7 +21,19 @@ import { publicEnv, serverEnv } from '../env.ts';
  */
 let cached: SupabaseClient | null = null;
 
+/**
+ * Test seam: a client to hand out instead of the real one. It exists for tests only (see
+ * `testing/fake-supabase.ts`); no production path calls it. While it is set,
+ * `getAdminClient` returns it and never reads the environment. Pass `null` to clear it.
+ */
+let injected: SupabaseClient | null = null;
+
+export function setAdminClientForTests(client: SupabaseClient | null): void {
+  injected = client;
+}
+
 export function getAdminClient(): SupabaseClient {
+  if (injected) return injected;
   if (cached) return cached;
 
   cached = createClient(publicEnv.supabaseUrl, serverEnv.supabaseServiceRoleKey, {

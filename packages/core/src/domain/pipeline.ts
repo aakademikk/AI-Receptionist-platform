@@ -14,6 +14,7 @@ import { extractLead, leadNotificationEvents } from './lead.ts';
 import { composeHandoverBody, enqueueNotification } from './notify.ts';
 import { generateReply, summariseConversation } from './reply.ts';
 import { sourceForChannel } from './source.ts';
+import { timed, type TurnTimer } from './turn-timings.ts';
 import { renderMissedCallSms } from '../prompts/receptionist.ts';
 import { publicEnv } from '../env.ts';
 
@@ -193,6 +194,11 @@ export interface HandleInboundMessageInput {
    * notifications after it run as they would after a generated reply.
    */
   cannedReply?: string;
+  /**
+   * Voice only: collects per-stage timings for the one line `replyToCaller` writes. Purely
+   * observational; nothing here branches on it.
+   */
+  timer?: TurnTimer;
   traceId?: string;
 }
 
@@ -255,12 +261,14 @@ export async function handleInboundMessage(
   const channel: CommsChannel = input.channel ?? 'sms';
 
   // --- Resolve tenant + thread ---------------------------------------------
-  const { data: resolvedData, error: resolveError } = await supabase.rpc('resolve_inbound', {
-    p_to_number: input.toNumber,
-    p_from_number: input.fromNumber,
-    p_channel: channel,
-    p_source: sourceForChannel(channel),
-  });
+  const { data: resolvedData, error: resolveError } = await timed(input.timer, 'resolve_inbound', () =>
+    supabase.rpc('resolve_inbound', {
+      p_to_number: input.toNumber,
+      p_from_number: input.fromNumber,
+      p_channel: channel,
+      p_source: sourceForChannel(channel),
+    }),
+  );
 
   if (resolveError) throw new Error(`resolve_inbound failed: ${resolveError.message}`);
 
@@ -279,16 +287,18 @@ export async function handleInboundMessage(
   });
 
   // --- 1 & 2. Record the inbound message, idempotently ----------------------
-  const { data: appendData, error: appendError } = await supabase.rpc('append_message', {
-    p_conversation_id: resolved.conversation_id,
-    p_direction: 'inbound',
-    p_sender: 'customer',
-    p_body: input.body,
-    p_channel: channel,
-    p_provider: 'twilio',
-    p_provider_message_id: input.providerMessageId ?? null,
-    p_status: 'received',
-  });
+  const { data: appendData, error: appendError } = await timed(input.timer, 'append_inbound', () =>
+    supabase.rpc('append_message', {
+      p_conversation_id: resolved.conversation_id,
+      p_direction: 'inbound',
+      p_sender: 'customer',
+      p_body: input.body,
+      p_channel: channel,
+      p_provider: 'twilio',
+      p_provider_message_id: input.providerMessageId ?? null,
+      p_status: 'received',
+    }),
+  );
 
   if (appendError) throw new Error(`append_message failed: ${appendError.message}`);
 
@@ -310,10 +320,12 @@ export async function handleInboundMessage(
     return { ...base, reply: null, handover: null, capturePending: false, lead: null };
   }
 
-  const [context, memory] = await Promise.all([
-    loadBusinessContext(resolved.business_id),
-    loadConversationMemory(resolved.conversation_id),
-  ]);
+  const [context, memory] = await timed(input.timer, 'load_context_memory', () =>
+    Promise.all([
+      loadBusinessContext(resolved.business_id),
+      loadConversationMemory(resolved.conversation_id),
+    ]),
+  );
 
   const fromNumber =
     context.phone_numbers.find((n) => n.channels.includes(channel))?.e164 ?? input.toNumber;
@@ -347,10 +359,12 @@ export async function handleInboundMessage(
   // Track confusion even when it is below the threshold — that is how the counter
   // reaches the threshold on a later message.
   if (!decision.shouldHandover && shouldIncrementConfusion(input.body)) {
-    await supabase
-      .from('conversations')
-      .update({ confusion_count: memory.confusion_count + 1 })
-      .eq('id', resolved.conversation_id);
+    await timed(input.timer, 'confusion_update', () =>
+      supabase
+        .from('conversations')
+        .update({ confusion_count: memory.confusion_count + 1 })
+        .eq('id', resolved.conversation_id),
+    );
   }
 
   if (decision.shouldHandover && decision.reason) {
@@ -473,14 +487,16 @@ export async function handleInboundMessage(
    */
   let callbackPending = false;
   if (channel === 'voice' && input.callSid && !memory.ai_enabled && context.settings.ai_enabled) {
-    const { data: firstOfCall } = await supabase
-      .from('messages')
-      .select('created_at')
-      .eq('conversation_id', resolved.conversation_id)
-      .like('provider_message_id', `${input.callSid}:%`)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    const { data: firstOfCall } = await timed(input.timer, 'callback_lookup', () =>
+      supabase
+        .from('messages')
+        .select('created_at')
+        .eq('conversation_id', resolved.conversation_id)
+        .like('provider_message_id', `${input.callSid}:%`)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
+    );
     callbackPending = isMuteFromEarlierCall({
       mutedAt: memory.muted_at,
       thisCallStartedAt: (firstOfCall as { created_at: string } | null)?.created_at,
@@ -553,6 +569,7 @@ export async function handleInboundMessage(
           context,
           memory: callbackPending ? { ...memoryWithInbound, callback_pending: true } : memoryWithInbound,
           traceId,
+          timer: input.timer,
         });
 
   // A provider refusal is not an error — it means a person is needed.

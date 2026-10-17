@@ -1,4 +1,9 @@
-import { GoogleGenAI, type GenerateContentConfig, type GenerateContentResponse } from '@google/genai';
+import {
+  GoogleGenAI,
+  type GenerateContentConfig,
+  type GenerateContentResponse,
+  type GenerateContentResponseUsageMetadata,
+} from '@google/genai';
 
 import {
   estimateCostUsd,
@@ -55,12 +60,23 @@ const THINKING_BUDGET: Record<Effort, number> = {
   xhigh: 2048,
   max: 4096,
 };
+/** What the whole and the streamed paths both reduce a Gemini reply to. */
+interface RawReply {
+  text: string;
+  finishReason: string | null;
+  finishMessage: string | null;
+  usageMeta: GenerateContentResponseUsageMetadata | undefined;
+}
+
+type GoogleModels = Pick<GoogleGenAI['models'], 'generateContent' | 'generateContentStream'>;
+
 export class GoogleProvider implements AiProvider {
   readonly name = 'google' as const;
-  private readonly client: GoogleGenAI;
+  private readonly models: GoogleModels;
 
-  constructor(apiKey: string) {
-    this.client = new GoogleGenAI({ apiKey });
+  /** `models` is injectable so a test can pass a fake; production uses the SDK's. */
+  constructor(apiKey: string, models?: GoogleModels) {
+    this.models = models ?? new GoogleGenAI({ apiKey }).models;
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResult> {
@@ -87,23 +103,69 @@ export class GoogleProvider implements AiProvider {
       config.responseJsonSchema = request.jsonSchema.schema;
     }
 
+    const params = {
+      model: request.model,
+      // Gemini has no assistant/user distinction at the top level — it uses
+      // 'model' for its own turns.
+      contents: request.messages.map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      })),
+      config,
+    };
+
+    // Structured output stays on the whole-response call: partial JSON is useless.
+    if (request.stream && !request.jsonSchema) {
+      let raw: RawReply = { text: '', finishReason: null, finishMessage: null, usageMeta: undefined };
+      let firstTokenMs: number | null = null;
+      try {
+        const stream = await this.models.generateContentStream(params);
+        let text = '';
+        for await (const chunk of stream) {
+          const piece = chunk.text ?? '';
+          if (piece !== '') {
+            if (firstTokenMs === null) firstTokenMs = Date.now() - started;
+            text += piece;
+          }
+          // The finish reason and usage normally arrive on the last chunk only, so
+          // keep the last chunk that carries each.
+          const candidate = chunk.candidates?.[0];
+          if (candidate?.finishReason) {
+            raw.finishReason = candidate.finishReason;
+            raw.finishMessage = candidate.finishMessage ?? null;
+          }
+          if (chunk.usageMetadata) raw.usageMeta = chunk.usageMetadata;
+        }
+        raw.text = text;
+      } catch (error) {
+        throw toProviderError(error);
+      }
+      const lastTokenMs = Date.now() - started;
+      return {
+        ...this.buildResult(request, started, raw),
+        timing: { firstTokenMs, lastTokenMs },
+      };
+    }
+
     let response: GenerateContentResponse;
     try {
-      response = await this.client.models.generateContent({
-        model: request.model,
-        // Gemini has no assistant/user distinction at the top level — it uses
-        // 'model' for its own turns.
-        contents: request.messages.map((m) => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
-        config,
-      });
+      response = await this.models.generateContent(params);
     } catch (error) {
       throw toProviderError(error);
     }
 
-    const usageMeta = response.usageMetadata;
+    const candidate = response.candidates?.[0];
+    return this.buildResult(request, started, {
+      text: response.text ?? '',
+      finishReason: candidate?.finishReason ?? null,
+      finishMessage: candidate?.finishMessage ?? null,
+      usageMeta: response.usageMetadata,
+    });
+  }
+
+  /** The one place a reply becomes a `GenerateResult`, so the two paths cannot drift. */
+  private buildResult(request: GenerateRequest, started: number, raw: RawReply): GenerateResult {
+    const usageMeta = raw.usageMeta;
     // Google bills thinking as output, but `candidatesTokenCount` counts only the
     // visible answer — so a pro-model reply that reasons for ~480 tokens would be
     // logged and priced as if it produced ~50. Fold the hidden tokens in, and stay
@@ -117,14 +179,15 @@ export class GoogleProvider implements AiProvider {
           ? null
           : (visibleTokens ?? 0) + (thinkingTokens ?? 0),
       cachedTokens: usageMeta?.cachedContentTokenCount ?? null,
+      visibleTokens,
+      thinkingTokens,
     };
 
-    const candidate = response.candidates?.[0];
-    const finishReason = candidate?.finishReason ?? null;
+    const finishReason = raw.finishReason;
     // SAFETY / PROHIBITED_CONTENT are Gemini's refusal equivalents.
     const refused = finishReason === 'SAFETY' || finishReason === 'PROHIBITED_CONTENT';
 
-    const text = (response.text ?? '').trim();
+    const text = raw.text.trim();
 
     return {
       provider: this.name,
@@ -140,7 +203,7 @@ export class GoogleProvider implements AiProvider {
         ? {
             refusal: {
               category: finishReason,
-              explanation: candidate?.finishMessage ?? null,
+              explanation: raw.finishMessage,
             },
           }
         : {}),

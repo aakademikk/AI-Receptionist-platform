@@ -10,6 +10,7 @@ import {
   isWrapUpLine,
 } from './closing.ts';
 import { handleInboundMessage, type HandleInboundMessageResult } from './pipeline.ts';
+import { createTurnTimer, timed, type TurnKind, type TurnTimer } from './turn-timings.ts';
 
 /**
  * One turn of a phone call.
@@ -108,8 +109,44 @@ export interface VoiceTurnResult {
   closing: VoiceTurnClosing;
 }
 
+/**
+ * One turn, plus exactly one timings line.
+ *
+ * The line goes through `logger`, so it lands on stdout and in the relay's journal. It
+ * carries numbers, the turn's `kind`, and the three ids that locate it, and nothing the
+ * caller or the assistant said: it is written for a person measuring delay, not reading
+ * the call. It is written in a `finally`, so a turn that fails still leaves its line.
+ */
 export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnResult> {
   const traceId = input.traceId ?? newTraceId();
+  const timer = createTurnTimer();
+  const startedAt = performance.now();
+  try {
+    return await answerCaller(input, traceId, timer);
+  } finally {
+    timer.set('total', performance.now() - startedAt);
+    const { stages, notes } = timer.snapshot();
+    logger.info('Voice turn timings', {
+      traceId,
+      callSid: input.callSid,
+      turn: input.turn,
+      kind: notes.kind ?? null,
+      stages,
+      tokens: {
+        prompt: notes.prompt_tokens ?? null,
+        visible: notes.visible_tokens ?? null,
+        thinking: notes.thinking_tokens ?? null,
+      },
+    });
+  }
+}
+
+async function answerCaller(
+  input: VoiceTurnInput,
+  traceId: string,
+  timer: TurnTimer,
+): Promise<VoiceTurnResult> {
+  const kind = (value: TurnKind) => timer.note('kind', value);
 
   /*
    * Decided from the caller's words before the pipeline runs, because the closing lines
@@ -148,6 +185,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
       callSid: input.callSid,
       deferExtraction: true,
       cannedReply,
+      timer,
       traceId,
     });
   } catch (error) {
@@ -164,6 +202,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
       message: error instanceof Error ? error.message : String(error),
     });
 
+    kind('failed');
     return {
       speak: CANNOT_TAKE_CALL,
       endCall: true,
@@ -184,6 +223,7 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
 
   if (!result.isNewMessage) {
     logger.warn('Duplicate voice turn', { traceId, callSid: input.callSid, turn: input.turn });
+    kind('duplicate');
     return { ...base, speak: DID_NOT_CATCH, endCall: false, closing: 'none' };
   }
 
@@ -209,27 +249,37 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
       endCall: muted.endCall,
     });
     // Written down like any other spoken line, so the transcript shows what the caller heard.
-    await recordAssistantTurn({
-      conversationId: result.conversationId,
-      body: muted.speak,
-      sender: 'system',
-      aiLogId: null,
-      callSid: input.callSid,
-      turn: input.turn,
-      traceId,
-    });
+    await timed(timer, 'record_assistant_turn', () =>
+      recordAssistantTurn({
+        conversationId: result.conversationId,
+        body: muted.speak,
+        sender: 'system',
+        aiLogId: null,
+        callSid: input.callSid,
+        turn: input.turn,
+        traceId,
+      }),
+    );
+    kind('muted');
     return { ...base, ...muted };
   }
 
-  await recordAssistantTurn({
-    conversationId: result.conversationId,
-    body: result.reply.body,
-    sender: result.reply.sender,
-    aiLogId: result.reply.aiLogId,
-    callSid: input.callSid,
-    turn: input.turn,
-    traceId,
-  });
+  // Captured so the narrowing from the muted check above survives into the closure.
+  const reply = result.reply;
+  await timed(timer, 'record_assistant_turn', () =>
+    recordAssistantTurn({
+      conversationId: result.conversationId,
+      body: reply.body,
+      sender: reply.sender,
+      aiLogId: reply.aiLogId,
+      callSid: input.callSid,
+      turn: input.turn,
+      traceId,
+    }),
+  );
+
+  // Handover wins over a closing line, as in the returns below; a canned line used no model.
+  kind(base.handover !== null ? 'handover' : cannedReply !== undefined ? 'canned' : 'model');
 
   /*
    * The last guard before text becomes audio. `generateReply` has already shaped this

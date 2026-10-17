@@ -45,6 +45,11 @@ export interface GenerateRequest {
    */
   jsonSchema?: { name: string; schema: JsonSchema };
   timeoutMs?: number;
+  /**
+   * Stream internally to time the first token; the result is still the whole reply.
+   * Only the Google adapter acts on this, and never for a `jsonSchema` request.
+   */
+  stream?: boolean;
   /** Correlation id, threaded through to ai_logs for cross-system tracing. */
   traceId?: string;
 }
@@ -53,6 +58,10 @@ export interface TokenUsage {
   promptTokens: number | null;
   completionTokens: number | null;
   cachedTokens: number | null;
+  /** Visible answer tokens alone (Google only); `completionTokens` folds thinking in. */
+  visibleTokens?: number | null;
+  /** Hidden reasoning tokens (Google only). */
+  thinkingTokens?: number | null;
 }
 
 export interface GenerateResult {
@@ -66,6 +75,8 @@ export interface GenerateResult {
   /** Null when we have no verified price for the model — never a guess. */
   costUsd: number | null;
   latencyMs: number;
+  /** Set only by a streamed call: ms from the request start to the first text and to the end. */
+  timing?: { firstTokenMs: number | null; lastTokenMs: number };
   stopReason: string | null;
   /**
    * Populated when the provider's safety layer declined the request. This is a

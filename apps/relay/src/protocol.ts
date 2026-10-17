@@ -158,6 +158,52 @@ export function estimatedSpeechMs(token: string): number {
   return Math.ceil((token.length / SPEECH_CHARS_PER_SECOND) * 1000);
 }
 
+/*
+ * The frame probe: a measurement aid, off by default.
+ *
+ * Twilio's docs do not say whether ConversationRelay starts speaking on the first
+ * `last: false` text frame, or how it treats text sent after an `interrupt`. With
+ * `frameProbe` on, a final prompt that says "latency probe" plus one of three words is
+ * answered here with canned frames instead of going to the reply function, so a real call
+ * can show both. Nothing else changes: any other utterance takes the normal path, and with
+ * the flag off none of this runs.
+ */
+
+/** Every probe phrase contains this, once lowercased with punctuation removed. */
+export const PROBE_PHRASE = 'latency probe';
+
+/** Probe one: the gap between the `last: false` frame and the closing `last: true` frame. */
+export const PROBE_ONE_GAP_MS = 4000;
+
+/** Probe two: how long after the interrupt the late `last: false` frame is sent. */
+export const PROBE_TWO_LATE_MS = 2000;
+
+const PROBE_ONE_FIRST = 'Probe one. This first part was sent on its own. ';
+const PROBE_ONE_SECOND = 'And this second part was sent four seconds later.';
+const PROBE_TWO_LATE = 'Late part, sent after you interrupted.';
+const PROBE_CHECK = 'Probe check. Can you hear this?';
+
+/** About fifteen seconds of speech at `SPEECH_CHARS_PER_SECOND`, in plain sentences. */
+const PROBE_TWO_LONG =
+  'Probe two. This is a long passage, sent as a single partial frame, so that you have time to speak over it. ' +
+  'Keep listening for a little while and then interrupt me at any point. ' +
+  'I will carry on talking about nothing in particular until you do. ' +
+  'The weather is mild, the kettle is on, and the post has not yet arrived. ' +
+  'There is plenty more to say, so please do interrupt whenever you like.';
+
+type ProbeKind = 'one' | 'two' | 'check';
+
+/** Which probe an utterance asks for, if any. Exact phrases only. */
+function probeFor(heard: string): ProbeKind | null {
+  const words = heard.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!words.includes(PROBE_PHRASE)) return null;
+  const tokens = words.split(' ');
+  if (tokens.includes('one')) return 'one';
+  if (tokens.includes('two')) return 'two';
+  if (tokens.includes('check')) return 'check';
+  return null;
+}
+
 /** The turns after which caller silence means the call is over rather than a pause. */
 const ARMS_SILENCE_BACKSTOP: ReadonlySet<RelayReply['closing']> = new Set([
   'asked_anything_else',
@@ -199,6 +245,17 @@ export interface RelaySessionOptions {
    * loud, not what was merely composed.
    */
   onInterrupted?: (info: { callSid: string; turn: number; heard: string }) => void;
+  /**
+   * The clock, in milliseconds. Injected so a test can say how long a reply took; it is
+   * `Date.now` everywhere else.
+   */
+  now?: () => number;
+  /**
+   * Answer three exact spoken probe phrases with canned frames, to measure how
+   * ConversationRelay treats partial `last: false` text. Off unless the relay sets
+   * `RELAY_FRAME_PROBE=1`. See `PROBE_PHRASE`.
+   */
+  frameProbe?: boolean;
 }
 
 /**
@@ -267,6 +324,7 @@ export class RelaySession {
     askedBefore: boolean;
     justAskedBefore: boolean;
   } | null = null;
+  private readonly now: () => number;
   private readonly onInterrupted: ((info: { callSid: string; turn: number; heard: string }) => void) | null;
 
   private readonly send: ((frames: OutboundFrame[]) => void) | null;
@@ -281,6 +339,11 @@ export class RelaySession {
    */
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  private readonly frameProbe: boolean;
+  /** The pending probe timer, if any. Cleared on dispose so it cannot outlive the call. */
+  private probeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Set while probe two's long frame may be interrupted; consumed by the first interrupt. */
+  private probeTwo: { turn: number; promptFinalAt: number } | null = null;
 
   constructor(options: RelaySessionOptions = {}) {
     this.maxTurns = options.maxTurns ?? 40;
@@ -288,6 +351,8 @@ export class RelaySession {
     this.onEvent = options.onEvent ?? (() => {});
     this.send = options.send ?? null;
     this.onInterrupted = options.onInterrupted ?? null;
+    this.now = options.now ?? Date.now;
+    this.frameProbe = options.frameProbe ?? false;
     // Sanitised once, here: a line that sanitises to nothing disables the backstop rather
     // than sending the empty token Twilio drops the call for.
     this.stillThereToken = sanitiseForSpeech(options.stillThereLine ?? '');
@@ -300,6 +365,7 @@ export class RelaySession {
   dispose(): void {
     this.disposed = true;
     this.clearSilenceTimer();
+    this.clearProbeTimer();
   }
 
   /** True once we have told Twilio to end the call. */
@@ -350,6 +416,7 @@ export class RelaySession {
           discardedTurn: this.pendingTurn || null,
         });
         this.pendingTurn = 0;
+        this.noteProbeInterrupt();
         this.takeBackUnheard(typeof frame.utteranceUntilInterrupt === 'string' ? frame.utteranceUntilInterrupt : '');
         return [];
 
@@ -402,6 +469,7 @@ export class RelaySession {
 
     this.turns += 1;
     const turn = this.turns;
+    const promptFinalAt = this.now();
     this.onEvent('prompt_final', { text, turn });
 
     if (!this.call) {
@@ -413,6 +481,12 @@ export class RelaySession {
        * this file exists not to do.
        */
       this.onEvent('prompt_before_setup', { turn });
+      return [];
+    }
+
+    const probe = this.frameProbe && this.send ? probeFor(text) : null;
+    if (probe) {
+      this.runProbe(probe, turn, promptFinalAt);
       return [];
     }
 
@@ -450,6 +524,15 @@ export class RelaySession {
       this.onEvent('empty_reply', { turn });
     } else {
       messages.push({ type: 'text', token, last: true });
+      // The latency target is measured from `prompt_final` to this first text frame. It
+      // carries `callSid` because the other relay events do not, and the stats script
+      // joins on it. Once per turn: this is the only place a turn's text is built.
+      this.onEvent('turn_first_frame', {
+        callSid: this.call.callSid ?? '',
+        turn,
+        msSincePromptFinal: this.now() - promptFinalAt,
+        streamed: false,
+      });
     }
 
     this.onEvent('turn_answered', { turn, endCall: reply.endCall, spokenChars: token.length });
@@ -467,6 +550,67 @@ export class RelaySession {
     }
 
     return messages;
+  }
+
+  /** Send one probe frame and log it. Every probe token is non-empty. */
+  private sendProbeFrame(
+    probe: ProbeKind,
+    turn: number,
+    frame: number,
+    promptFinalAt: number,
+    token: string,
+    last: boolean,
+  ): void {
+    this.send?.([{ type: 'text', token, last }]);
+    this.onEvent('probe_frame', { turn, probe, frame, last, msSincePromptFinal: this.now() - promptFinalAt });
+  }
+
+  /** The probe branch of a final prompt. It touches no transcript and calls no reply. */
+  private runProbe(probe: ProbeKind, turn: number, promptFinalAt: number): void {
+    this.clearProbeTimer();
+    this.probeTwo = null;
+    // A probe is not a reply, so an interrupt over it has nothing to take back.
+    this.lastSpoken = null;
+
+    if (probe === 'check') {
+      this.sendProbeFrame('check', turn, 1, promptFinalAt, PROBE_CHECK, true);
+    } else if (probe === 'one') {
+      this.sendProbeFrame('one', turn, 1, promptFinalAt, PROBE_ONE_FIRST, false);
+      this.probeTimer = setTimeout(() => {
+        this.probeTimer = null;
+        if (this.ended || this.disposed) return;
+        this.sendProbeFrame('one', turn, 2, promptFinalAt, PROBE_ONE_SECOND, true);
+      }, PROBE_ONE_GAP_MS);
+      this.probeTimer.unref?.();
+    } else {
+      this.sendProbeFrame('two', turn, 1, promptFinalAt, PROBE_TWO_LONG, false);
+      this.probeTwo = { turn, promptFinalAt };
+    }
+  }
+
+  /** Probe two: an interrupt during the long frame schedules the one late frame. */
+  private noteProbeInterrupt(): void {
+    const pending = this.probeTwo;
+    if (!pending) return;
+    this.probeTwo = null;
+    this.onEvent('probe_interrupt', {
+      turn: pending.turn,
+      probe: 'two',
+      msSincePromptFinal: this.now() - pending.promptFinalAt,
+    });
+
+    this.clearProbeTimer();
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null;
+      if (this.ended || this.disposed) return;
+      this.sendProbeFrame('two', pending.turn, 2, pending.promptFinalAt, PROBE_TWO_LATE, false);
+    }, PROBE_TWO_LATE_MS);
+    this.probeTimer.unref?.();
+  }
+
+  private clearProbeTimer(): void {
+    if (this.probeTimer !== null) clearTimeout(this.probeTimer);
+    this.probeTimer = null;
   }
 
   /**

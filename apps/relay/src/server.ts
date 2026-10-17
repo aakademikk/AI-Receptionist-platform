@@ -41,6 +41,9 @@ import { checkSignature } from './signature.ts';
  */
 const PORT = Number.parseInt(process.env.RELAY_PORT ?? '3002', 10);
 
+// A measurement aid, off unless set to exactly 1. See the frame probe in `protocol.ts`.
+const FRAME_PROBE = process.env.RELAY_FRAME_PROBE === '1';
+
 /**
  * Fail at boot if the auth token is missing.
  *
@@ -140,6 +143,7 @@ sockets.on('connection', (ws: WebSocket) => {
     stillThereLine: STILL_THERE_LINE,
     // Not awaited: the caller is mid-sentence, and the transcript can catch up.
     onInterrupted: (info) => void recordInterruptedTurn(info),
+    frameProbe: FRAME_PROBE,
   });
 
   ws.on('message', (data) => {
@@ -201,6 +205,7 @@ server.listen(PORT, process.env.RELAY_HOST ?? '127.0.0.1', () => {
     // The public URL is derived per-connection from the upgrade request's host, so there
     // is nothing to print here but whether an override is in force.
     publicUrlOverride: process.env.RELAY_PUBLIC_URL ? 'set' : 'not set',
+    frameProbe: FRAME_PROBE ? 'on' : 'off',
   });
 });
 

@@ -8,6 +8,7 @@ import { logger } from '../utils/logger.ts';
 import { redactObject } from '../utils/redact.ts';
 import { cleanModelReply, measureSms, trimToSegments } from '../utils/sms.ts';
 import { limitForSpeech, MAX_SPOKEN_CHARS } from '../utils/speech.ts';
+import { timed, type TurnTimer } from './turn-timings.ts';
 
 /**
  * AI Response engine.
@@ -23,6 +24,8 @@ export interface GenerateReplyInput {
   memory: ConversationMemory;
   traceId?: string;
   now?: Date;
+  /** Voice only: collects stage timings; see `turn-timings.ts`. Observational. */
+  timer?: TurnTimer;
 }
 
 export interface GenerateReplyResult {
@@ -37,6 +40,11 @@ export interface GenerateReplyResult {
   wasTrimmed: boolean;
   /** Set when the provider's safety layer declined; the caller must escalate. */
   refused: { category: string | null; explanation: string | null } | null;
+  /** Streamed voice replies only: first and last token times, for stage timing. */
+  timing?: GenerateResult['timing'];
+  /** Google only: the visible answer and hidden reasoning split of the completion tokens. */
+  visibleTokens?: number | null;
+  thinkingTokens?: number | null;
 }
 
 export async function generateReply(input: GenerateReplyInput): Promise<GenerateReplyResult> {
@@ -48,25 +56,29 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
     conversationId: memory.conversation_id,
   });
 
-  const system = buildReceptionistSystemPrompt({ context, memory, now: input.now });
+  const { system, messages } = await timed(input.timer, 'prompt_build', () => {
+    const system = buildReceptionistSystemPrompt({ context, memory, now: input.now });
 
-  // Only the customer's and the business's actual turns go in. System messages
-  // (delivery receipts, internal notes) would read as instructions to the model.
-  const messages = memory.transcript
-    .filter((m) => m.body && m.body.trim() !== '' && m.sender !== 'system')
-    .map((m) => ({
-      role: m.sender === 'customer' ? ('user' as const) : ('assistant' as const),
-      content: m.body!.trim(),
-    }));
+    // Only the customer's and the business's actual turns go in. System messages
+    // (delivery receipts, internal notes) would read as instructions to the model.
+    const messages = memory.transcript
+      .filter((m) => m.body && m.body.trim() !== '' && m.sender !== 'system')
+      .map((m) => ({
+        role: m.sender === 'customer' ? ('user' as const) : ('assistant' as const),
+        content: m.body!.trim(),
+      }));
 
-  // A model cannot be asked to reply to nothing. This happens when a thread was
-  // opened by a missed call and the customer has not yet said anything.
-  if (messages.length === 0 || messages[messages.length - 1]!.role !== 'user') {
-    messages.push({
-      role: 'user',
-      content: '(The customer has not sent a message yet. Open the conversation.)',
-    });
-  }
+    // A model cannot be asked to reply to nothing. This happens when a thread was
+    // opened by a missed call and the customer has not yet said anything.
+    if (messages.length === 0 || messages[messages.length - 1]!.role !== 'user') {
+      messages.push({
+        role: 'user',
+        content: '(The customer has not sent a message yet. Open the conversation.)',
+      });
+    }
+
+    return { system, messages };
+  });
 
   let result: GenerateResult;
   try {
@@ -80,43 +92,61 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
       effort: settings.ai_effort,
       temperature: settings.ai_temperature,
       timeoutMs: 45_000,
+      // A voice turn streams internally so the first token can be timed; the
+      // reply it hands back is still the whole text.
+      stream: memory.channel === 'voice',
       traceId: input.traceId,
     });
   } catch (error) {
     // Log the failure against the tenant so a broken model config is visible in
     // the dashboard rather than only in server logs.
-    await recordAiLog({
+    await timed(input.timer, 'record_ai_log', () =>
+      recordAiLog({
+        businessId: context.business_id,
+        conversationId: memory.conversation_id,
+        purpose: 'reply',
+        provider: settings.ai_provider,
+        model: settings.ai_model,
+        effort: settings.ai_effort,
+        status: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        traceId: input.traceId,
+      }),
+    );
+    throw error;
+  }
+
+  // Timings come from the streamed call (voice) and the usage block; absent stays absent.
+  if (input.timer) {
+    if (result.timing) {
+      if (result.timing.firstTokenMs !== null) input.timer.set('gemini_first_token', result.timing.firstTokenMs);
+      input.timer.set('gemini_last_token', result.timing.lastTokenMs);
+    }
+    input.timer.note('prompt_tokens', result.usage.promptTokens ?? null);
+    input.timer.note('visible_tokens', result.usage.visibleTokens ?? null);
+    input.timer.note('thinking_tokens', result.usage.thinkingTokens ?? null);
+  }
+
+  const aiLogId = await timed(input.timer, 'record_ai_log', () =>
+    recordAiLog({
       businessId: context.business_id,
       conversationId: memory.conversation_id,
       purpose: 'reply',
       provider: settings.ai_provider,
-      model: settings.ai_model,
+      model: result.model,
       effort: settings.ai_effort,
-      status: 'error',
-      errorMessage: error instanceof Error ? error.message : String(error),
+      status: result.refusal ? 'refused' : 'ok',
+      promptTokens: result.usage.promptTokens,
+      completionTokens: result.usage.completionTokens,
+      cachedTokens: result.usage.cachedTokens,
+      costUsd: result.costUsd,
+      latencyMs: result.latencyMs,
+      stopReason: result.stopReason,
+      request: { system, messages },
+      response: { text: result.text },
       traceId: input.traceId,
-    });
-    throw error;
-  }
-
-  const aiLogId = await recordAiLog({
-    businessId: context.business_id,
-    conversationId: memory.conversation_id,
-    purpose: 'reply',
-    provider: settings.ai_provider,
-    model: result.model,
-    effort: settings.ai_effort,
-    status: result.refusal ? 'refused' : 'ok',
-    promptTokens: result.usage.promptTokens,
-    completionTokens: result.usage.completionTokens,
-    cachedTokens: result.usage.cachedTokens,
-    costUsd: result.costUsd,
-    latencyMs: result.latencyMs,
-    stopReason: result.stopReason,
-    request: { system, messages },
-    response: { text: result.text },
-    traceId: input.traceId,
-  });
+    }),
+  );
 
   if (result.refusal) {
     log.warn('Model declined to answer; escalating to a human', {
@@ -132,6 +162,9 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
       segments: 0,
       wasTrimmed: false,
       refused: result.refusal,
+      timing: result.timing,
+      visibleTokens: result.usage.visibleTokens,
+      thinkingTokens: result.usage.thinkingTokens,
     };
   }
 
@@ -198,6 +231,9 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
     segments: measureSms(body).segments,
     wasTrimmed,
     refused: null,
+    timing: result.timing,
+    visibleTokens: result.usage.visibleTokens,
+    thinkingTokens: result.usage.thinkingTokens,
   };
 }
 

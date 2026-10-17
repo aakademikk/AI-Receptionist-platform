@@ -283,6 +283,44 @@ describe('RelaySession', () => {
     assert.ok(names().includes('turn_superseded'));
   });
 
+  it('logs when the first text frame leaves, measured from the final prompt', async () => {
+    let clock = 10_000;
+    const { fn, resolve } = deferredReply();
+    const events: Array<{ event: string; fields: Record<string, unknown> }> = [];
+    const session = new RelaySession({
+      reply: fn,
+      now: () => clock,
+      onEvent: (event, fields) => events.push({ event, fields }),
+    });
+    await session.handle(SETUP);
+
+    const pending = session.handle(finalPrompt('book me in for Friday'));
+    clock += 1500;
+    resolve(0, { speak: 'Certainly.', endCall: false });
+    assert.equal(textOf(await pending), 'Certainly.');
+
+    const frames = events.filter((entry) => entry.event === 'turn_first_frame');
+    assert.equal(frames.length, 1);
+    assert.deepEqual(frames[0]!.fields, { callSid: 'CA123', turn: 1, msSincePromptFinal: 1500, streamed: false });
+  });
+
+  it('logs no first frame for a superseded turn or an empty reply', async () => {
+    const { fn, resolve } = deferredReply();
+    const { session, names } = sessionWithLog({ reply: fn });
+    await session.handle(SETUP);
+
+    const pending = session.handle(finalPrompt('book me in for Friday'));
+    await session.handle({ type: 'interrupt', utteranceUntilInterrupt: 'no wait', durationUntilInterruptMs: 400 });
+    resolve(0, { speak: 'Certainly.', endCall: false });
+    assert.deepEqual(await pending, []);
+
+    const empty = session.handle(finalPrompt('hello'));
+    resolve(1, { speak: '', endCall: false });
+    await empty;
+
+    assert.equal(names().includes('turn_first_frame'), false);
+  });
+
   it('says nothing when the caller interrupts with no reply in flight', async () => {
     const { session, names } = sessionWithLog();
     assert.deepEqual(
@@ -725,5 +763,130 @@ describe('RelaySession', () => {
     const { session, names } = sessionWithLog();
     assert.deepEqual(await session.handle({ type: 'something-new' }), []);
     assert.deepEqual(names(), ['unhandled_frame']);
+  });
+});
+
+describe('frame probe', () => {
+  function probeSession(frameProbe: boolean | undefined, reply: RelayReplyFn) {
+    const sent: OutboundFrame[] = [];
+    const events: Array<{ event: string; fields: Record<string, unknown> }> = [];
+    const session = new RelaySession({
+      reply,
+      frameProbe,
+      onEvent: (event, fields) => events.push({ event, fields }),
+      send: (frames) => sent.push(...frames),
+    });
+    return { session, events, sent, names: () => events.map((entry) => entry.event) };
+  }
+
+  const noEmptyTokens = (sent: OutboundFrame[]): void => {
+    for (const frame of sent) {
+      assert.equal(frame.type, 'text');
+      if (frame.type === 'text') assert.notEqual(frame.token.trim(), '');
+    }
+  };
+
+  it('sends the phrase to the reply function when the flag is off', async () => {
+    const { fn, requests } = recordingReply();
+    const { session, sent } = probeSession(undefined, fn);
+    await session.handle(SETUP);
+
+    const frames = await session.handle(finalPrompt('Latency probe one.'));
+    assert.equal(requests.length, 1);
+    assert.equal(textOf(frames), 'Of course.');
+    assert.deepEqual(sent, []);
+  });
+
+  it('leaves ordinary speech alone when the flag is on', async () => {
+    const { fn, requests } = recordingReply();
+    const { session, sent } = probeSession(true, fn);
+    await session.handle(SETUP);
+
+    await session.handle(finalPrompt('I need a probe one for my latency'));
+    assert.equal(requests.length, 1);
+    assert.deepEqual(sent, []);
+  });
+
+  it('probe one sends the first part at once and the last part at 4,000 ms', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { fn, requests } = recordingReply();
+    const { session, events, sent, names } = probeSession(true, fn);
+    await session.handle(SETUP);
+
+    assert.deepEqual(await session.handle(finalPrompt('Latency probe, one!')), []);
+    assert.equal(requests.length, 0);
+    assert.deepEqual(sent, [{ type: 'text', token: 'Probe one. This first part was sent on its own. ', last: false }]);
+
+    t.mock.timers.tick(3999);
+    assert.equal(sent.length, 1);
+    t.mock.timers.tick(1);
+    assert.deepEqual(sent[1], { type: 'text', token: 'And this second part was sent four seconds later.', last: true });
+    assert.equal(sent.length, 2);
+
+    assert.equal(events.filter((entry) => entry.event === 'probe_frame').length, 2);
+    assert.deepEqual(events.find((entry) => entry.event === 'probe_frame')!.fields, {
+      turn: 1,
+      probe: 'one',
+      frame: 1,
+      last: false,
+      msSincePromptFinal: 0,
+    });
+    assert.ok(names().includes('prompt_final'));
+    assert.equal(names().includes('turn_first_frame'), false);
+    noEmptyTokens(sent);
+  });
+
+  it('probe two sends one late partial frame 2,000 ms after an interrupt, and no closing frame', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { fn, requests } = recordingReply();
+    const { session, events, sent, names } = probeSession(true, fn);
+    await session.handle(SETUP);
+
+    await session.handle(finalPrompt('latency probe two'));
+    assert.equal(sent.length, 1);
+    assert.equal((sent[0] as { last: boolean }).last, false);
+
+    await session.handle({ type: 'interrupt', utteranceUntilInterrupt: 'Probe two. This is', durationUntilInterruptMs: 3000 });
+    assert.ok(names().includes('probe_interrupt'));
+    t.mock.timers.tick(1999);
+    assert.equal(sent.length, 1);
+    t.mock.timers.tick(1);
+    assert.deepEqual(sent[1], { type: 'text', token: 'Late part, sent after you interrupted.', last: false });
+
+    t.mock.timers.tick(60_000);
+    assert.equal(sent.length, 2);
+    assert.equal(sent.some((frame) => frame.type === 'text' && frame.last === true), false);
+    assert.equal(requests.length, 0);
+    assert.equal(events.filter((entry) => entry.event === 'probe_frame').length, 2);
+    noEmptyTokens(sent);
+  });
+
+  it('probe two sends nothing more when nobody interrupts', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { session, sent } = probeSession(true, recordingReply().fn);
+    await session.handle(SETUP);
+    await session.handle(finalPrompt('latency probe two'));
+    t.mock.timers.tick(60_000);
+    assert.equal(sent.length, 1);
+  });
+
+  it('check sends one closing frame', async () => {
+    const { fn, requests } = recordingReply();
+    const { session, sent } = probeSession(true, fn);
+    await session.handle(SETUP);
+
+    assert.deepEqual(await session.handle(finalPrompt('Latency probe check')), []);
+    assert.deepEqual(sent, [{ type: 'text', token: 'Probe check. Can you hear this?', last: true }]);
+    assert.equal(requests.length, 0);
+  });
+
+  it('cancels a pending probe frame when the session is disposed', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { session, sent } = probeSession(true, recordingReply().fn);
+    await session.handle(SETUP);
+    await session.handle(finalPrompt('latency probe one'));
+    session.dispose();
+    t.mock.timers.tick(10_000);
+    assert.equal(sent.length, 1);
   });
 });

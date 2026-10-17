@@ -27,6 +27,16 @@ export { GoogleProvider } from './google.ts';
  */
 const clients = new Map<ProviderName, AiProvider>();
 
+/**
+ * Test seam: put a fake provider in the cache (or take it out again with `null`), so a
+ * whole turn can run without an SDK client or an API key. It exists for tests only (see
+ * `testing/fake-provider.ts`); no production path calls it.
+ */
+export function setProviderForTests(name: ProviderName, provider: AiProvider | null): void {
+  if (provider) clients.set(name, provider);
+  else clients.delete(name);
+}
+
 export function getProvider(name: ProviderName): AiProvider {
   const cached = clients.get(name);
   if (cached) return cached;
