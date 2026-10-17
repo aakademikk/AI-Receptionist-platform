@@ -198,8 +198,9 @@ function probeFor(heard: string): ProbeKind | null {
   const words = heard.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!words.includes(PROBE_PHRASE)) return null;
   const tokens = words.split(' ');
-  if (tokens.includes('one')) return 'one';
-  if (tokens.includes('two')) return 'two';
+  // Twilio's speech-to-text writes these as digits ("Latency probe 1."), so accept both.
+  if (tokens.includes('one') || tokens.includes('1')) return 'one';
+  if (tokens.includes('two') || tokens.includes('2')) return 'two';
   if (tokens.includes('check')) return 'check';
   return null;
 }

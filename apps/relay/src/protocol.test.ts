@@ -863,6 +863,23 @@ describe('frame probe', () => {
     noEmptyTokens(sent);
   });
 
+  // Twilio's speech-to-text writes the numbers as digits: the live T10 call on 2026-10-17
+  // was heard as "Latency probe 1." and went to the reply function instead of the probe.
+  it('matches the digits Twilio transcribes, as well as the words', async () => {
+    for (const [heard, first] of [
+      ['Latency probe 1.', 'Probe one. This first part was sent on its own. '],
+      ['Latency probe 2.', 'Probe two.'],
+    ] as const) {
+      const { fn, requests } = recordingReply();
+      const { session, sent } = probeSession(true, fn);
+      await session.handle(SETUP);
+      await session.handle(finalPrompt(heard));
+      assert.equal(requests.length, 0, heard);
+      assert.ok(sent[0]?.type === 'text' && sent[0].token.startsWith(first), heard);
+      session.dispose();
+    }
+  });
+
   it('probe two sends nothing more when nobody interrupts', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const { session, sent } = probeSession(true, recordingReply().fn);
