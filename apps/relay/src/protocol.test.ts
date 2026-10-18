@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { isValidVoiceModel } from '@atwood/core/integrations';
+
 import {
   RelaySession,
   SILENCE_HANGUP_MS,
@@ -967,5 +969,194 @@ describe('reportSocketClose', () => {
     const logged: string[] = [];
     reportSocketClose(session, 1000, '', (message) => logged.push(message));
     assert.deepEqual(logged, ['Relay socket closed']);
+  });
+});
+
+/**
+ * The per-call voice model override (amy-speed-test T13). The TwiML's `voiceModel`
+ * parameter reaches the reply function only when it passes the shared pattern; a bad one
+ * is dropped and named in the log without its value.
+ */
+describe('voice model override from the setup parameters', () => {
+  const setupWith = (customParameters: Record<string, string>): InboundFrame => ({
+    ...SETUP,
+    customParameters,
+  });
+
+  function run(customParameters: Record<string, string>) {
+    const { fn, requests } = recordingReply();
+    const events: Array<{ event: string; fields: Record<string, unknown> }> = [];
+    const session = new RelaySession({
+      reply: fn,
+      isVoiceModel: isValidVoiceModel,
+      onEvent: (event, fields) => events.push({ event, fields }),
+    });
+    return { session, requests, events, setup: setupWith(customParameters) };
+  }
+
+  it('passes a valid voiceModel through to the reply and logs the names', async () => {
+    const { session, requests, events, setup } = run({
+      businessId: 'biz-1',
+      turnVariant: 'flux-0.8+gemini-3.5-flash',
+      voiceModel: 'gemini-3.5-flash',
+    });
+    await session.handle(setup);
+    await session.handle(finalPrompt('hello'));
+
+    assert.equal(requests[0]!.modelOverride, 'gemini-3.5-flash');
+    const setupEvent = events.find((entry) => entry.event === 'setup')!;
+    assert.equal(setupEvent.fields.turnVariant, 'flux-0.8+gemini-3.5-flash');
+    assert.equal(setupEvent.fields.voiceModel, 'gemini-3.5-flash');
+  });
+
+  it('does not pass a voiceModel that fails the pattern, and never logs its value', async () => {
+    const { session, requests, events, setup } = run({ businessId: 'biz-1', voiceModel: 'gpt-x' });
+    await session.handle(setup);
+    await session.handle(finalPrompt('hello'));
+
+    assert.equal(requests[0]!.modelOverride, undefined);
+    assert.ok(events.some((entry) => entry.event === 'voice_model_rejected'));
+    assert.equal(JSON.stringify(events).includes('gpt-x'), false);
+  });
+
+  it('logs turnVariant as today and no voiceModel when the parameters are missing', async () => {
+    const { session, requests, events, setup } = run({ businessId: 'biz-1' });
+    await session.handle(setup);
+    await session.handle(finalPrompt('hello'));
+
+    assert.equal(requests[0]!.modelOverride, undefined);
+    const setupEvent = events.find((entry) => entry.event === 'setup')!;
+    assert.equal(setupEvent.fields.turnVariant, 'today');
+    assert.equal(setupEvent.fields.voiceModel, null);
+    assert.equal(events.some((entry) => entry.event === 'voice_model_rejected'), false);
+  });
+
+  it('ignores a voiceModel when no validator was supplied', async () => {
+    const { fn, requests } = recordingReply();
+    const session = new RelaySession({ reply: fn });
+    await session.handle(setupWith({ voiceModel: 'gemini-3.5-flash' }));
+    await session.handle(finalPrompt('hello'));
+
+    assert.equal(requests[0]!.modelOverride, undefined);
+  });
+});
+
+/**
+ * The eager end-of-turn lead time (amy-speed-test T14). With partial prompts on (a `flux`
+ * variant), the first `last: false` frame of a turn is the candidate eager signal, and the
+ * final prompt reports how long before it that came. Logging only: Amy replies to the final
+ * prompt alone, and no event here carries the caller's words.
+ */
+describe('eager_lead and prompt_partial_fields', () => {
+  function run(turnVariant: string | undefined, clock: { t: number }) {
+    const { fn, requests } = recordingReply();
+    const events: Array<{ event: string; fields: Record<string, unknown> }> = [];
+    const session = new RelaySession({
+      reply: fn,
+      now: () => clock.t,
+      onEvent: (event, fields) => events.push({ event, fields }),
+    });
+    const setup: InboundFrame =
+      turnVariant === undefined ? SETUP : { ...SETUP, customParameters: { businessId: 'biz-1', turnVariant } };
+    return { session, requests, events, setup };
+  }
+  const partial = (text: string, extra: Record<string, unknown> = {}): InboundFrame => ({
+    type: 'prompt',
+    voicePrompt: text,
+    last: false,
+    ...extra,
+  });
+  const leadOf = (events: Array<{ event: string; fields: Record<string, unknown> }>) =>
+    events.filter((entry) => entry.event === 'eager_lead');
+
+  it('reports msEagerToFinal and matched when the final text equals the eager text', async () => {
+    const clock = { t: 1000 };
+    const { session, events, setup } = run('flux-0.8', clock);
+    await session.handle(setup);
+    await session.handle(partial("Roughly how much is a full rewire"));
+    clock.t = 1400;
+    await session.handle(finalPrompt('Roughly, how much is a full rewire?'));
+
+    const leads = leadOf(events);
+    assert.equal(leads.length, 1);
+    assert.deepEqual(leads[0]!.fields, { callSid: 'CA123', turn: 1, msEagerToFinal: 400, matched: true });
+  });
+
+  it('reports matched false when the texts differ, and times from the first partial only', async () => {
+    const clock = { t: 0 };
+    const { session, events, setup } = run('flux-0.7+gemini-3.5-flash', clock);
+    await session.handle(setup);
+    await session.handle(partial('Sorry how soon'));
+    clock.t = 100;
+    await session.handle(partial('Sorry how soon can you'));
+    clock.t = 500;
+    await session.handle(finalPrompt('Sorry, how soon can you come?'));
+
+    const leads = leadOf(events);
+    assert.equal(leads.length, 1);
+    assert.equal(leads[0]!.fields.msEagerToFinal, 500);
+    assert.equal(leads[0]!.fields.matched, false);
+  });
+
+  it('does not reply to an eager frame alone', async () => {
+    const clock = { t: 0 };
+    const { session, requests, events, setup } = run('flux-0.8', clock);
+    await session.handle(setup);
+    const out = await session.handle(partial('Hello there'));
+
+    assert.deepEqual(out, []);
+    assert.equal(requests.length, 0);
+    assert.equal(leadOf(events).length, 0);
+  });
+
+  it('starts afresh each turn and writes nothing when no partial came', async () => {
+    const clock = { t: 0 };
+    const { session, events, setup } = run('flux-0.8', clock);
+    await session.handle(setup);
+    await session.handle(partial('One'));
+    clock.t = 200;
+    await session.handle(finalPrompt('One'));
+    clock.t = 300;
+    await session.handle(finalPrompt('Two'));
+
+    const leads = leadOf(events);
+    assert.equal(leads.length, 1);
+    assert.equal(leads[0]!.fields.turn, 1);
+  });
+
+  it('writes no eager_lead and no prompt_partial_fields for turnVariant today', async () => {
+    const clock = { t: 0 };
+    const { session, events, setup } = run('today', clock);
+    await session.handle(setup);
+    await session.handle(partial('Hello', { stability: 0.5 }));
+    clock.t = 400;
+    await session.handle(finalPrompt('Hello'));
+
+    assert.equal(leadOf(events).length, 0);
+    assert.equal(events.some((entry) => entry.event === 'prompt_partial_fields'), false);
+    assert.ok(events.some((entry) => entry.event === 'prompt_partial'));
+  });
+
+  it('writes no eager_lead when the setup carried no variant', async () => {
+    const clock = { t: 0 };
+    const { session, events, setup } = run(undefined, clock);
+    await session.handle(setup);
+    await session.handle(partial('Hello'));
+    await session.handle(finalPrompt('Hello'));
+    assert.equal(leadOf(events).length, 0);
+  });
+
+  it('logs the non-text fields of a partial frame, never the words', async () => {
+    const clock = { t: 0 };
+    const { session, events, setup } = run('flux-0.8', clock);
+    await session.handle(setup);
+    await session.handle(partial('secret caller words', { lang: 'en-GB', eager: true, confidence: 0.9, alt: { a: 'secret' } }));
+
+    const fieldsEvent = events.find((entry) => entry.event === 'prompt_partial_fields')!;
+    assert.deepEqual(fieldsEvent.fields.names, ['last', 'lang', 'eager', 'confidence', 'alt']);
+    assert.deepEqual(fieldsEvent.fields.values, { lang: 'en-GB', last: false, eager: true, confidence: 0.9, alt: '<object>' });
+    assert.equal(JSON.stringify(fieldsEvent).includes('secret'), false);
+    assert.equal(JSON.stringify(fieldsEvent).includes('caller words'), false);
+    assert.equal(JSON.stringify(events.filter((entry) => entry.event === 'eager_lead')).includes('words'), false);
   });
 });

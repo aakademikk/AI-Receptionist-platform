@@ -371,6 +371,14 @@ export function buildGatherTwiml(options: {
   return parts.join('\n');
 }
 
+/*
+ * Twilio's documented range for the Flux end-of-turn threshold (default 0.8). Named
+ * rather than inlined because the error message quotes them and a later change to
+ * Twilio's range should be one edit.
+ */
+const EOT_THRESHOLD_MIN = 0.5;
+const EOT_THRESHOLD_MAX = 0.9;
+
 /**
  * TwiML that hands the call to a WebSocket, for a conversational assistant.
  *
@@ -430,6 +438,20 @@ export function buildConversationRelayTwiml(options: {
    * sentence into two turns, at the cost of that much more wait before every reply.
    */
   speechTimeout?: number;
+  /**
+   * Confidence, 0.5 to 0.9, that Deepgram Flux needs before it ends the caller's turn.
+   * Omitted means Twilio's default (0.8). Lower ends the turn sooner and risks cutting a
+   * caller off mid-thought; higher waits longer. Twilio applies it only when
+   * `transcriptionProvider` is `Deepgram` and `speechModel` is `flux`, and ignores it
+   * otherwise.
+   */
+  eotThreshold?: number;
+  /**
+   * Ask Twilio to send unfinalised prompts and eager end-of-turn events to the socket,
+   * marked `last: false`, ahead of the final one. Omitted means Twilio's default (off).
+   * Same Deepgram and `flux` condition as `eotThreshold`.
+   */
+  partialPrompts?: boolean;
   dtmfDetection?: boolean;
   /**
    * Extra values delivered to the socket in the `setup` message's `customParameters`.
@@ -482,6 +504,20 @@ export function buildConversationRelayTwiml(options: {
       throw badRequest(`ConversationRelay speechTimeout must be a whole number of ms from 600 to 5000, got ${options.speechTimeout}.`);
     }
     attributes.push(`speechTimeout="${options.speechTimeout}"`);
+  }
+  if (options.eotThreshold !== undefined) {
+    // Checked here for the same reason as `speechTimeout`: a value outside Twilio's
+    // documented range is a failed call, not a clamped one. The negated comparison
+    // also refuses NaN, which would slip past a plain `< min || > max` test.
+    if (!(options.eotThreshold >= EOT_THRESHOLD_MIN && options.eotThreshold <= EOT_THRESHOLD_MAX)) {
+      throw badRequest(
+        `ConversationRelay eotThreshold must be a number from ${EOT_THRESHOLD_MIN} to ${EOT_THRESHOLD_MAX}, got ${options.eotThreshold}.`,
+      );
+    }
+    attributes.push(`eotThreshold="${options.eotThreshold}"`);
+  }
+  if (options.partialPrompts !== undefined) {
+    attributes.push(`partialPrompts="${options.partialPrompts ? 'true' : 'false'}"`);
   }
   if (options.dtmfDetection) {
     attributes.push('dtmfDetection="true"');

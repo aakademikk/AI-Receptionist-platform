@@ -23,6 +23,14 @@ export {
   type InboundCallPayload,
 } from './twilio.ts';
 
+export {
+  isValidVoiceModel,
+  parseVoiceTestVariant,
+  TODAY_VARIANT,
+  type VoiceTestVariant,
+  type VoiceTestTurnSettings,
+} from './voice-test-variant.ts';
+
 export { sendEmail, renderBrandedEmail, type SendEmailInput } from './email.ts';
 
 export {

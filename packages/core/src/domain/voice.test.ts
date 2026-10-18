@@ -176,3 +176,59 @@ describe('replyToCaller timings line', () => {
     assert.equal('prompt_build' in found[0]!.stages, false);
   });
 });
+
+/**
+ * The per-call model override (amy-speed-test T13). A voice turn may carry a model name
+ * that replaces the tenant's `ai_model` for that call only; without one the tenant's
+ * model is used exactly as before. The request the fake provider receives is the proof.
+ */
+describe('replyToCaller model override', () => {
+  const TENANT_MODEL = 'gemini-3.8-flash';
+  const OVERRIDE_MODEL = 'gemini-3.5-flash';
+  let db: FakeSupabase;
+  let model: FakeProvider;
+
+  beforeEach(() => {
+    db = new FakeSupabase();
+    model = new FakeProvider({ text: 'Yes, we cover Rayleigh.' });
+    setAdminClientForTests(db.asClient());
+    setProviderForTests('google', model);
+  });
+
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    setAdminClientForTests(null);
+    setProviderForTests('google', null);
+  });
+
+  const turn = (extra: Partial<VoiceTurnInput> = {}): VoiceTurnInput => ({
+    callSid: 'CA-override',
+    toNumber: FAKE_TO_NUMBER,
+    fromNumber: '+447700900123',
+    heard: 'Do you cover Rayleigh?',
+    turn: 1,
+    ...extra,
+  });
+
+  it('sends the override model to the provider in place of the tenant model', async () => {
+    await replyToCaller(turn({ modelOverride: OVERRIDE_MODEL }));
+
+    const replyRequest = model.requests[0]!;
+    assert.equal(replyRequest.model, OVERRIDE_MODEL);
+  });
+
+  it('sends the tenant model when there is no override', async () => {
+    await replyToCaller(turn());
+
+    assert.equal(model.requests[0]!.model, TENANT_MODEL);
+  });
+
+  it('does not let one call override leak into the next call', async () => {
+    await replyToCaller(turn({ modelOverride: OVERRIDE_MODEL }));
+    await replyToCaller(turn({ callSid: 'CA-other', turn: 1 }));
+
+    const models = model.requests.map((request) => request.model);
+    assert.equal(models[0], OVERRIDE_MODEL);
+    assert.ok(models.includes(TENANT_MODEL));
+  });
+});

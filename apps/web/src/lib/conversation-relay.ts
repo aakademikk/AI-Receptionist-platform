@@ -1,4 +1,4 @@
-import { buildConversationRelayTwiml } from '@atwood/core';
+import { buildConversationRelayTwiml, parseVoiceTestVariant, TODAY_VARIANT } from '@atwood/core';
 
 import { publicOrigin } from '@/lib/twilio-webhook';
 
@@ -47,6 +47,16 @@ export function conversationRelayTwiml(input: {
   /** What the caller hears first, already shaped for speech. */
   greeting: string;
 }): string {
+  /*
+   * Amy speed test: `VOICE_TEST_VARIANT` names which speech settings this call gets. It is
+   * read here, at request time, from a server-side variable (not `NEXT_PUBLIC_`), so a
+   * restart picks up a changed value with no rebuild. Unset, empty or unparseable all mean
+   * `today`, whose `turn` is empty: the builder input below is then exactly what it was
+   * before the variant existed, and the TwiML is byte-identical.
+   */
+  const variant = parseVoiceTestVariant(process.env.VOICE_TEST_VARIANT);
+  const { threshold, ...turn } = variant.turn;
+
   return buildConversationRelayTwiml({
     url: socketUrl(input.request),
     /*
@@ -77,10 +87,21 @@ export function conversationRelayTwiml(input: {
     speechTimeout: 1200,
     ttsProvider: 'ElevenLabs',
     voice: VOICE_ID,
+    // Empty for `today`. A variant's `threshold` is the builder's `eotThreshold`.
+    ...turn,
+    ...(threshold === undefined ? {} : { eotThreshold: threshold }),
     parameters: {
       businessId: input.businessId,
       callSid: input.callSid,
       to: input.to,
+      /*
+       * The relay logs the variant per call, so each call's journal names the settings it
+       * ran on, and uses `voiceModel` for that call only (T13). Neither is added for
+       * `today`, which keeps today's TwiML byte-identical; the relay reads a missing
+       * `turnVariant` as `today`.
+       */
+      ...(variant.name === TODAY_VARIANT ? {} : { turnVariant: variant.name }),
+      ...(variant.voiceModel === undefined ? {} : { voiceModel: variant.voiceModel }),
     },
   });
 }

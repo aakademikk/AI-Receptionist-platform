@@ -794,6 +794,50 @@ describe('buildConversationRelayTwiml', () => {
     }
   });
 
+  it('emits neither Flux attribute when they are not given, so today\'s TwiML is unchanged', () => {
+    const xml = buildConversationRelayTwiml({ url: RELAY_URL, speechTimeout: 1200 });
+    assert.doesNotMatch(xml, /eotThreshold/);
+    assert.doesNotMatch(xml, /partialPrompts/);
+  });
+
+  it('emits eotThreshold and partialPrompts when given', () => {
+    assert.match(buildConversationRelayTwiml({ url: RELAY_URL, eotThreshold: 0.7 }), /\seotThreshold="0\.7"/);
+    assert.match(buildConversationRelayTwiml({ url: RELAY_URL, partialPrompts: true }), /\spartialPrompts="true"/);
+    assert.match(buildConversationRelayTwiml({ url: RELAY_URL, partialPrompts: false }), /\spartialPrompts="false"/);
+    // Both ends of Twilio's documented 0.5 to 0.9 range are allowed.
+    assert.match(buildConversationRelayTwiml({ url: RELAY_URL, eotThreshold: 0.5 }), /eotThreshold="0\.5"/);
+    assert.match(buildConversationRelayTwiml({ url: RELAY_URL, eotThreshold: 0.9 }), /eotThreshold="0\.9"/);
+  });
+
+  it('refuses an eotThreshold outside 0.5 to 0.9, which Twilio would fail the call on', () => {
+    for (const bad of [0.49, 0.91, 0, 1, -0.7, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.throws(
+        () => buildConversationRelayTwiml({ url: RELAY_URL, eotThreshold: bad }),
+        /eotThreshold must be/,
+        `${bad} should be refused`,
+      );
+    }
+  });
+
+  it('builds a Flux-shaped call with each of the four attributes exactly once', () => {
+    const xml = buildConversationRelayTwiml({
+      url: RELAY_URL,
+      transcriptionProvider: 'Deepgram',
+      speechModel: 'flux',
+      eotThreshold: 0.7,
+      speechTimeout: 1200,
+      partialPrompts: true,
+    });
+    for (const attribute of [
+      'speechModel="flux"',
+      'eotThreshold="0.7"',
+      'speechTimeout="1200"',
+      'partialPrompts="true"',
+    ]) {
+      assert.equal(xml.split(attribute).length - 1, 1, `${attribute} should appear exactly once`);
+    }
+  });
+
   it('connects under <Connect> rather than as a bare verb', () => {
     const xml = buildConversationRelayTwiml({ url: RELAY_URL });
     assert.match(xml, /<Connect>\s*<ConversationRelay url="wss:\/\/receptionist\.aaa123\.uk\/relay" \/>\s*<\/Connect>/);

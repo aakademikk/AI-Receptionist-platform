@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 
 import { STILL_THERE_LINE, recordInterruptedTurn, replyToCaller } from '@atwood/core/domain';
 import { serverEnv } from '@atwood/core/env';
+import { isValidVoiceModel } from '@atwood/core/integrations';
 import { validateTwilioSignature } from '@atwood/core/integrations/twilio';
 import { logger } from '@atwood/core/utils';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -144,6 +145,8 @@ sockets.on('connection', (ws: WebSocket) => {
     // Not awaited: the caller is mid-sentence, and the transcript can catch up.
     onInterrupted: (info) => void recordInterruptedTurn(info),
     frameProbe: FRAME_PROBE,
+    // The same pattern the web app's TwiML builder applies before it emits `voiceModel`.
+    isVoiceModel: isValidVoiceModel,
   });
 
   ws.on('message', (data) => {

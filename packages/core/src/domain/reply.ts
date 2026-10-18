@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { generateWithRetry } from '../ai/index.ts';
 import type { GenerateResult } from '../ai/provider.ts';
 import { buildReceptionistSystemPrompt } from '../prompts/receptionist.ts';
@@ -19,6 +21,17 @@ import { timed, type TurnTimer } from './turn-timings.ts';
  * enough to test and to re-run against a finished conversation.
  */
 
+/**
+ * Carries a voice call's model override from `replyToCaller` down to `generateReply`.
+ *
+ * Between the two sits `handleInboundMessage`, which builds the `generateReply` input and
+ * serves every channel; the speed test must not change it, so the override travels as
+ * async context instead of a new field on the pipeline. It is set only by `replyToCaller`,
+ * for the span of one voice turn, so no SMS, WhatsApp or web chat reply can ever see one.
+ * An explicit `modelOverride` on the input wins over it.
+ */
+export const modelOverrideScope = new AsyncLocalStorage<string>();
+
 export interface GenerateReplyInput {
   context: BusinessContext;
   memory: ConversationMemory;
@@ -26,6 +39,15 @@ export interface GenerateReplyInput {
   now?: Date;
   /** Voice only: collects stage timings; see `turn-timings.ts`. Observational. */
   timer?: TurnTimer;
+  /**
+   * Voice only: a model name that replaces the tenant's `ai_model` for this reply, with the
+   * provider unchanged. It exists for the Amy speed test, which must try another model on
+   * phone calls without writing `business_settings`, because that row also drives SMS,
+   * WhatsApp and web chat. Absent means the tenant's model, exactly as before. The caller
+   * is responsible for having validated the name; `ai_logs` records `result.model`, so the
+   * override shows there with no new column.
+   */
+  modelOverride?: string;
 }
 
 export interface GenerateReplyResult {
@@ -80,10 +102,12 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
     return { system, messages };
   });
 
+  const model = input.modelOverride ?? modelOverrideScope.getStore() ?? settings.ai_model;
+
   let result: GenerateResult;
   try {
     result = await generateWithRetry(settings.ai_provider, {
-      model: settings.ai_model,
+      model,
       system,
       messages,
       // Thinking shares this budget on current Claude models, so the configured
@@ -106,7 +130,7 @@ export async function generateReply(input: GenerateReplyInput): Promise<Generate
         conversationId: memory.conversation_id,
         purpose: 'reply',
         provider: settings.ai_provider,
-        model: settings.ai_model,
+        model,
         effort: settings.ai_effort,
         status: 'error',
         errorMessage: error instanceof Error ? error.message : String(error),

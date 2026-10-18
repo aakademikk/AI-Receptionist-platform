@@ -114,6 +114,12 @@ export interface RelayReplyRequest {
   anythingElseAsked?: boolean;
   /** True when the last reply the caller heard was "anything else?" itself. */
   anythingElseJustAsked?: boolean;
+  /**
+   * A voice model name for this call's replies, taken from the setup frame's `voiceModel`
+   * parameter and only after it passed the session's `isVoiceModel` check. Absent means
+   * the tenant's configured model.
+   */
+  modelOverride?: string;
 }
 
 export interface RelayReply {
@@ -205,6 +211,11 @@ function probeFor(heard: string): ProbeKind | null {
   return null;
 }
 
+/** Lowercase, punctuation and extra spaces stripped, for comparing eager and final text. */
+function normaliseForCompare(text: string): string {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+}
+
 /** The turns after which caller silence means the call is over rather than a pause. */
 const ARMS_SILENCE_BACKSTOP: ReadonlySet<RelayReply['closing']> = new Set([
   'asked_anything_else',
@@ -257,6 +268,13 @@ export interface RelaySessionOptions {
    * `RELAY_FRAME_PROBE=1`. See `PROBE_PHRASE`.
    */
   frameProbe?: boolean;
+  /**
+   * Decides whether a `voiceModel` parameter may become a model override. Injected, like
+   * the reply function, so this module keeps no dependency on core; `server.ts` passes the
+   * pattern check the web app's TwiML builder uses. Absent means every override is
+   * ignored, which is the safe default.
+   */
+  isVoiceModel?: (value: string) => boolean;
 }
 
 /**
@@ -265,6 +283,9 @@ export interface RelaySessionOptions {
  * reply cut off before its end asked nothing.
  */
 const HEARD_IN_FULL = 0.9;
+
+/** What the setup event names as the variant when the TwiML carries none: today's behaviour. */
+const DEFAULT_TURN_VARIANT = 'today';
 
 const NO_REPLY: RelayReplyFn = async () => ({
   speak: 'Sorry, something has gone wrong at our end. Please try again shortly.',
@@ -295,6 +316,8 @@ export class RelaySession {
    * that from happening.
    */
   private pendingTurn = 0;
+  /** The first partial frame of the turn in progress (T14): its time and normalised text. */
+  private firstPartial: { at: number; normalised: string } | null = null;
   private ended = false;
   /**
    * True once the caller has heard "anything else?" on this call.
@@ -341,6 +364,9 @@ export class RelaySession {
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private readonly frameProbe: boolean;
+  private readonly isVoiceModel: (value: string) => boolean;
+  /** This call's accepted model override, set by `setup`; undefined when none or rejected. */
+  private modelOverride: string | undefined;
   /** The pending probe timer, if any. Cleared on dispose so it cannot outlive the call. */
   private probeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set while probe two's long frame may be interrupted; consumed by the first interrupt. */
@@ -357,6 +383,7 @@ export class RelaySession {
     this.onInterrupted = options.onInterrupted ?? null;
     this.now = options.now ?? Date.now;
     this.frameProbe = options.frameProbe ?? false;
+    this.isVoiceModel = options.isVoiceModel ?? (() => false);
     // Sanitised once, here: a line that sanitises to nothing disables the backstop rather
     // than sending the empty token Twilio drops the call for.
     this.stillThereToken = sanitiseForSpeech(options.stillThereLine ?? '');
@@ -460,6 +487,24 @@ export class RelaySession {
      */
     this.call = frame;
 
+    /*
+     * The speed test's per-call model override. The parameter is read once, here, and kept
+     * only if it passes the check; otherwise the call carries on on the tenant's model and
+     * the log says a value was rejected without saying what it was. The raw value is also
+     * kept out of the logged `customParameters` below, so a rejected string cannot reach
+     * the journal by that route.
+     */
+    const { voiceModel: rawVoiceModel, ...loggableParameters } = frame.customParameters ?? {};
+    this.modelOverride = undefined;
+    if (rawVoiceModel !== undefined) {
+      if (this.isVoiceModel(rawVoiceModel)) {
+        this.modelOverride = rawVoiceModel;
+        (loggableParameters as Record<string, string>).voiceModel = rawVoiceModel;
+      } else {
+        this.onEvent('voice_model_rejected', {});
+      }
+    }
+
     this.onEvent('setup', {
       sessionId: frame.sessionId,
       callSid: frame.callSid,
@@ -467,9 +512,18 @@ export class RelaySession {
       to: frame.to,
       callType: frame.callType,
       direction: frame.direction,
-      customParameters: frame.customParameters ?? {},
+      customParameters: loggableParameters,
+      // Names only. `today` when the TwiML carried no variant (the default, unchanged line).
+      turnVariant: frame.customParameters?.turnVariant ?? DEFAULT_TURN_VARIANT,
+      voiceModel: this.modelOverride ?? null,
     });
     return [];
+  }
+
+  /** Partial prompts are on for any call whose turnVariant is not the default. */
+  private partialsOn(): boolean {
+    if (!this.call) return false;
+    return (this.call.customParameters?.turnVariant ?? DEFAULT_TURN_VARIANT) !== DEFAULT_TURN_VARIANT;
   }
 
   private async handlePrompt(frame: PromptFrame): Promise<OutboundFrame[]> {
@@ -478,6 +532,19 @@ export class RelaySession {
     if (frame.last !== true) {
       // An interim result. Logged, never answered — see the file header.
       this.onEvent('prompt_partial', { text });
+      if (this.partialsOn()) {
+        const names: string[] = [];
+        const values: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(frame as unknown as Record<string, unknown>)) {
+          if (key === 'type' || key === 'voicePrompt') continue;
+          names.push(key);
+          values[key] = typeof value === 'object' && value !== null ? '<object>' : value;
+        }
+        this.onEvent('prompt_partial_fields', { names, values });
+        if (this.firstPartial === null) {
+          this.firstPartial = { at: this.now(), normalised: normaliseForCompare(text) };
+        }
+      }
       return [];
     }
 
@@ -485,6 +552,17 @@ export class RelaySession {
     const turn = this.turns;
     const promptFinalAt = this.now();
     this.onEvent('prompt_final', { text, turn });
+
+    const eager = this.firstPartial;
+    this.firstPartial = null;
+    if (eager && this.call && this.partialsOn()) {
+      this.onEvent('eager_lead', {
+        callSid: this.call.callSid,
+        turn,
+        msEagerToFinal: promptFinalAt - eager.at,
+        matched: eager.normalised === normaliseForCompare(text),
+      });
+    }
 
     if (!this.call) {
       /*
@@ -514,6 +592,7 @@ export class RelaySession {
       turn,
       anythingElseAsked: this.anythingElseAsked,
       anythingElseJustAsked: this.anythingElseJustAsked,
+      ...(this.modelOverride === undefined ? {} : { modelOverride: this.modelOverride }),
     });
 
     if (this.pendingTurn !== turn) {

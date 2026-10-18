@@ -9,6 +9,7 @@ import {
   decideMutedTurn,
   isWrapUpLine,
 } from './closing.ts';
+import { modelOverrideScope } from './reply.ts';
 import { handleInboundMessage, type HandleInboundMessageResult } from './pipeline.ts';
 import { createTurnTimer, timed, type TurnKind, type TurnTimer } from './turn-timings.ts';
 
@@ -82,6 +83,12 @@ export interface VoiceTurnInput {
    * is a bare "no" a request to end the call; see `decideCallerClosing`.
    */
   anythingElseJustAsked?: boolean;
+  /**
+   * Replaces the tenant's `ai_model` for this turn's reply only, provider unchanged. The
+   * relay sets it from the TwiML's `voiceModel` parameter after validating the name. See
+   * `modelOverrideScope` for how it reaches the model call without touching the pipeline.
+   */
+  modelOverride?: string;
   traceId?: string;
 }
 
@@ -122,7 +129,9 @@ export async function replyToCaller(input: VoiceTurnInput): Promise<VoiceTurnRes
   const timer = createTurnTimer();
   const startedAt = performance.now();
   try {
-    return await answerCaller(input, traceId, timer);
+    return input.modelOverride === undefined
+      ? await answerCaller(input, traceId, timer)
+      : await modelOverrideScope.run(input.modelOverride, () => answerCaller(input, traceId, timer));
   } finally {
     timer.set('total', performance.now() - startedAt);
     const { stages, notes } = timer.snapshot();
