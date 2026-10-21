@@ -328,7 +328,7 @@ green with count (71 + new); core green with count (259 + new); core and relay t
 fallback count. Commit on `restyle/glassmorphism` (subject starting `Amy latency step 1b:`), not pushed.
 
 ## T10: GATE: deploy step 1 to the live relay and collect the step 1 evidence (Colin's go)
-Status: TODO
+Status: DONE 2026-10-18 (decisions 2 and 3 proved by probe calls and recordings; 5 baseline calls, 31 counted turns, stats saved; decision 9 before figure p50 4.17 s; decision 8 PASS: 36 of 36 voice ai_logs rows carry stop_reason and token counts; evidence ~/.sam/work/amy-latency/step1-evidence.md)
 Spec: must-do 5; Done-means 4; decisions 2, 3, 8 (live), 9 (before figure)
 Depends on: T3, T7, T8, T9, T9b
 Blocked by: Colin's go to deploy (SAM asks; no go, no deploy)
@@ -360,7 +360,7 @@ the probe results for decisions 2 and 3, the `ai_logs` result for decision 8, th
 If decision 8 fails (fields missing), stop: set this ticket and T11 to BLOCKED and report.
 
 ## T11: GATE: SAM puts the stage timings and the step 1 proofs (decisions 2, 3, 8) to Colin before any step 2 ticket starts
-Status: TODO
+Status: DONE 2026-10-18 (Colin answered; see "Colin's answer" at the end of this ticket)
 Spec: must-do 5, 19 (the count), Done-means 4 (write-up), Done-means 14 (thinking-token statement); decisions 1, 2, 3, 8, and the
 closing paragraph of "Decisions at lock"
 Depends on: T10
@@ -382,6 +382,16 @@ Steps:
 Do not touch: any code, the live system.
 Proof: before, `step1-baseline.md` does not exist and no answer is recorded here. After: the file exists with every item in step 1,
 and Colin's answer is written under this ticket. Only then set `Status: DONE`.
+
+Colin's answer (2026-10-18, about 11:45, in chat): "yes, we need to get it below the 4 seconds it is now. its too long needs to be 2 seconds absoloute max".
+- Yes to SAM's recommendation in `~/.sam/work/amy-latency/step1-baseline.md`: target (a) dropped as written; step 2 parked (not dropped);
+  no blind prompt trim; an offline speed test runs first as a new small spec (prompt size, Gemini caching, lighter tier, TTS start on short text).
+- New target replaces (a): caller-perceived delay (end of caller speech to Amy's first audio, decision 9 measure) at most 2 s. Today p50 4.17 s.
+- Step 2 and step 3 tickets stay TODO and do not start until the speed-test spec reports and Colin picks levers.
+- 2 s cannot be met while `speechTimeout` 1200 (locked 2026-10-16) and "no model or platform change" (Won't do) stand. Colin, 11:50:
+  "we may have to"; grill 11:55 to 11:56: smarter end-of-turn check first (else an occasional cut-off is fine), test on the VOLTA line,
+  ElevenLabs is a candidate if it outperforms, a faster model may score 27/32 with safety and voice cases passing.
+  Measured, not yet unlocked live: see [amy-speed-test-spec.md](amy-speed-test-spec.md).
 
 ---
 
