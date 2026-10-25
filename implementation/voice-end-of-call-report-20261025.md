@@ -38,7 +38,7 @@ Writing the files again would have overwritten Colin's 09-25 fixes or duplicated
 Instead, for each ticket I checked its steps and its proof against the current code and re-ran the proof.
 **No source file was changed in this session.** The only changes are this report and the six `Status:` lines in
 `implementation/voice-end-of-call-tickets.md`. Each Status line names the original commit and says it was re-verified, not built, today.
-If SAM would rather the Status lines stayed TODO until T7, reverting that one commit is safe.
+If SAM would rather the Status lines stayed TODO until T7, restoring those six lines (`git checkout 7ccb1b0 -- implementation/voice-end-of-call-tickets.md`) is safe.
 
 Test counts before and after are the same for every ticket below (core 279/279, relay 86/86, both typechecks clean),
 because no code changed.
@@ -208,4 +208,4 @@ None of these can be proven in the cloud container:
 4. **`SPEECH_CHARS_PER_SECOND = 15` is an estimate that has not been tuned.** Whether "are you still there?" cuts across Amy's own line can only be heard on a real call.
 5. **Whether the relay running on the box has this code.** It was built 09-24 and 09-25. Whether `atwood-relay` was restarted after those commits, and whether checks 10–12 were already proven live, is not recorded in the repo. If they were, T7 may only need its daily-note evidence found.
 6. **Colin's three 09-25 commits changed behaviour beyond the ticket text:** the bare-"no" rule, the muted-turn lines that arm the backstop, and the question taken back when spoken over. The spec still reads LOCKED 2026-09-24 and doesn't mention them. SAM may want the spec or tickets annotated.
-7. **The `Status:` lines I set** credit the 09-24 commits and today's re-run, not a new build. Revert commit "docs: mark voice end-of-call T1–T6 verified" if they should stay TODO until T7.
+7. **The `Status:` lines I set** credit the 09-24 commits and today's re-run, not a new build. Restore them with `git checkout 7ccb1b0 -- implementation/voice-end-of-call-tickets.md` if they should stay TODO until T7.
