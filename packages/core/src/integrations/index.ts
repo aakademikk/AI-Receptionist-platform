@@ -31,7 +31,16 @@ export {
   type VoiceTestTurnSettings,
 } from './voice-test-variant.ts';
 
-export { sendEmail, renderBrandedEmail, type SendEmailInput } from './email.ts';
+export {
+  registerElevenLabsCall,
+  callSidTail,
+  ELEVENLABS_API_BASE,
+  ELEVENLABS_TRIAL_AGENT_ID,
+  type RegisterCallInput,
+  type RegisterCallResult,
+} from './elevenlabs-register.ts';
+
+export { sendEmail,renderBrandedEmail, type SendEmailInput } from './email.ts';
 
 export {
   startCrawl,
