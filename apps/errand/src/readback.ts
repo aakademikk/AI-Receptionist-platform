@@ -78,13 +78,17 @@ export function spacedUkNumber(e164: string): string {
   return `+44 ${groups.filter(Boolean).join(' ')}`;
 }
 
-/** "Wed 28 Oct, between 19:00 and 20:30". The date is a calendar date; noon UTC keeps it on the day. */
-export function renderWindow(window: Brief['window']): string {
-  const [y, m, d] = window.date.split('-').map(Number) as [number, number, number];
-  const day = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+/** "Wed 28 Oct". The date is a calendar date; noon UTC keeps it on the day. */
+export function renderDay(date: string): string {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  return new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
     .format(new Date(Date.UTC(y, m - 1, d, 12)))
     .replace(/,/g, '');
-  return `${day}, between ${window.earliest} and ${window.latest}`;
+}
+
+/** "Wed 28 Oct, between 19:00 and 20:30". */
+export function renderWindow(window: Brief['window']): string {
+  return `${renderDay(window.date)}, between ${window.earliest} and ${window.latest}`;
 }
 
 /** `partySize` → `Party size`. */

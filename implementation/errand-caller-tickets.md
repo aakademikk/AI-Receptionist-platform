@@ -471,7 +471,7 @@ Do not touch: `apps/relay/src` (including its `RelaySession`).
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T17: Status callback, outcome and the Telegram report (must-dos 16, 17, 18)
-Status: TODO
+Status: DONE 2026-10-26 (errand 202/202 pass, 18 new; core 284, relay 86 unchanged; live 2-minute Telegram owed to SAM at T25-T29)
 Spec: must-dos 12 (outcome says which limit), 16, 17, 18; Robustness "Monitoring and alerts"; Done-means 12, 14
 Depends on: T5, T12, T16
 Blocked by: none

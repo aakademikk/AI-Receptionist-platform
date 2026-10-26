@@ -5,8 +5,10 @@ import { buildHangupTwiml, parseTwilioForm } from '@atwood/core/integrations/twi
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { ERRAND_PORT, HEALTH_PATH, SOCKET_PATH, STATUS_PATH, TWIML_PATH, errandHome, maskSid } from './config.ts';
+import { runNotifier } from './readback.ts';
 import { ErrandSession, type InboundFrame } from './session.ts';
 import { verifySocket, verifyWebhook } from './signature.ts';
+import { handleStatus } from './status.ts';
 import { errandTwiml } from './twiml.ts';
 import { errandExists, isErrandId } from './store.ts';
 import { type ModelFn, googleModel } from './turn.ts';
@@ -57,6 +59,8 @@ export interface ServerDeps {
   connection?: (ws: WebSocket, request: IncomingMessage) => void;
   /** The model behind the default session. Defaults to Amy's Gemini flash with `GOOGLE_API_KEY`. */
   model?: ModelFn;
+  /** The notifier behind the default status handler. Defaults to `notify-colin.sh`. */
+  notify?: (args: string[]) => Promise<number>;
 }
 
 /** Twilio's form bodies are small; anything bigger is not Twilio. */
@@ -100,7 +104,15 @@ export function createErrandServer(deps: ServerDeps): { server: Server; sockets:
   const home = deps.home ?? errandHome();
   const log = deps.log ?? jsonLog;
   const twiml = deps.twiml ?? ((errandId: string, params: Record<string, string>) => errandTwiml(errandId, params, { home }));
-  const status = deps.status ?? (() => undefined);
+  const notify = deps.notify ?? runNotifier();
+  const status =
+    deps.status ??
+    ((errandId: string, params: Record<string, string>) => {
+      // The report is not awaited: Twilio's request is answered as soon as the outcome is on disk.
+      void handleStatus(errandId, params, { home, notify }).reported?.catch((error: unknown) =>
+        log('Errand report failed', { message: error instanceof Error ? error.message : String(error) }),
+      );
+    });
   const connection = deps.connection ?? ((ws: WebSocket) => attachSession(ws, { home, log, model: deps.model ?? lazyGoogleModel() }));
 
   const server = createServer((request, response) => {

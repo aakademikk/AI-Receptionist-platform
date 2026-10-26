@@ -438,3 +438,36 @@ later prompt, never calls the model, outcome `voicemail_left`; the max-length ti
 errand ends at once; a close with no outcome leaves none; and end to end over a signed socket on the real server.
 
 Counts: before core 284 / relay 86 / errand 173; after core 284 / relay 86 / errand 184. All typechecks clean.
+
+## T17: status callback, outcome and the Telegram report — DONE
+
+Files: `apps/errand/src/status.ts` (new), `apps/errand/src/report.ts` (new), `apps/errand/src/status.test.ts` (new), `apps/errand/src/report.test.ts`
+(new), `apps/errand/src/server.ts` (edit: default status handler = `handleStatus(…, { home, notify })`, report not awaited; `ServerDeps.notify`),
+`apps/errand/src/store.ts` (edit: `claimReport()` — `reported.json` by exclusive create), `apps/errand/src/readback.ts` (edit: `renderDay()` split out
+of `renderWindow()` so the report can say "Wed 28 Oct").
+
+- `handleStatus()`: appends a `status` event (status, `AnsweredBy` or null, duration, masked CallSid, time) for every post. On `completed`,
+  `no-answer`, `busy`, `failed`, `canceled`, if no `outcome.json`: `no-answer` / `busy` / `failed` / `canceled` → `not_reached` with the reason;
+  `completed` with duration ≥ `MAX_CALL_S` → `ended_early` / `maximum length`; `completed` otherwise → `failed` / "call ended with no outcome". Then
+  `reportOnce()`. The outcome is written synchronously; the report runs without holding Twilio's request open.
+- `renderOutcome(outcome, brief)`: title "Errand: <business>: <kind>"; bodies for booked (date, time, name, reference), not booked (why, times
+  offered), voicemail left, not reached (reason), ended early (which limit), failed.
+- `reportOnce()`: claims `reported.json` exclusively *before* calling the notifier (`notify-colin.sh <title> <body> --full <text>`, injected), then a
+  `reported` event with the exit code, `sinceCallEndMs` and `late` (over `OUTCOME_REPORT_MS`). A notifier failure or throw is recorded; the outcome stays.
+- Neither module imports `twilio-call.ts` or `dial.ts` (test reads the source).
+
+Proof:
+```
+# before (status.ts and report.ts moved aside, server.ts at its T16 version): # tests 186  # pass 184  # fail 2
+Cannot find module '.../apps/errand/src/report.ts'
+Cannot find module '.../apps/errand/src/status.ts'
+# after: # tests 202  # pass 202  # fail 0     typecheck exit 0
+```
+Tests: each kind renders its fields; every status post is logged with its fields; `no-answer` writes "not reached", reports once and (no create path
+exists) makes zero call creates (Done-means 14); busy/failed reasons; duration 480 → maximum length, 479 → failed; a session outcome is kept; two
+`completed` posts send one message; a notifier failure is recorded and the outcome stays; through the server an unsigned status changes nothing and a
+signed `no-answer` settles and reports once.
+
+Done-means 12 (each live test's Telegram within 2 minutes of Twilio's end time) is owed to SAM (T25 to T29).
+
+Counts: before core 284 / relay 86 / errand 184; after core 284 / relay 86 / errand 202. All typechecks clean.

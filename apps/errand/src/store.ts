@@ -281,6 +281,20 @@ export function readAlert(id: string, home: string = errandHome()): Alert | null
   return readJson<Alert>(filePath(id, 'alert.json', home));
 }
 
+/**
+ * Claim the one outcome report: `reported.json` by exclusive create, before the notifier runs.
+ * True for exactly one caller, so a repeated status post can never send a second message.
+ */
+export function claimReport(id: string, now: Date, home: string = errandHome()): boolean {
+  try {
+    writeOnceJson(filePath(id, 'reported.json', home), { claimedAt: now.toISOString() });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
+  }
+}
+
 /** Every errand id in the store, oldest first (the id sorts by date and time). */
 export function listErrands(home: string = errandHome()): string[] {
   if (!existsSync(home)) return [];
