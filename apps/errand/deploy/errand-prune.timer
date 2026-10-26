@@ -1,0 +1,10 @@
+[Unit]
+Description=Atwood Errand: daily prune at 04:40, after the nightly sam-backup (04:16)
+
+[Timer]
+# After the backup, so a folder on its last day is in that night's backup before it goes.
+OnCalendar=*-*-* 04:40:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+#!/bin/sh
+# The `errand` command SAM runs (installed as ~/.local/bin/errand at deploy, T22).
+#
+# Runs the errand CLI through the keystore as the `errand-caller` consumer, with the tarball
+# Node (the system Node ignores --experimental-strip-types). Credentials reach the process
+# environment by name only; this script never reads or prints one.
+exec /home/col/.local/bin/with-secrets --as errand-caller -- \
+  /home/col/.local/node/bin/node --experimental-strip-types \
+  /home/col/receptionist-platform/apps/errand/src/cli.ts "$@"

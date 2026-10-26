@@ -175,7 +175,7 @@ and the ingress results.
 # The errand path (build agents, nothing live)
 
 ## T4: Package scaffold `apps/errand` with the locked values and a boundary test
-Status: TODO
+Status: DONE 2026-10-26 (errand 7/7 pass, typecheck clean; core 284, relay 86 unchanged; boundary mutation 6 pass 1 fail, reverted)
 Spec: must-do 20; Rules above; locked decisions
 Depends on: T2
 Blocked by: none
@@ -199,7 +199,7 @@ Proof: before, `apps/errand` does not exist. After: `pnpm --filter @atwood/erran
 temporarily adding `import '@atwood/core/domain'` to a source file makes the boundary test fail (revert it).
 
 ## T5: Errand folder store: id, brief, events, transcript, outcome
-Status: TODO
+Status: DONE 2026-10-26 (errand 23/23 pass, 16 new; core 284, relay 86 unchanged)
 Spec: must-dos 1, 17; Robustness "Data model"
 Depends on: T4
 Blocked by: none
@@ -222,7 +222,7 @@ Do not touch: anything outside `apps/errand`.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before (module absent).
 
 ## T6: Read-back message and the Go question
-Status: TODO
+Status: DONE 2026-10-26 (errand 30/30 pass, 7 new; core 284, relay 86 unchanged)
 Spec: must-dos 2, 3; OPEN 1; Done-means 1
 Depends on: T1, T5
 Blocked by: none
@@ -243,7 +243,7 @@ Do not touch: `notify-colin.sh`, SAM_ui, the closer (call them only through the 
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T7: Go-record check (must-do 3)
-Status: TODO
+Status: DONE 2026-10-26 (errand 48/48 pass, 18 new; core 284, relay 86 unchanged)
 Spec: must-do 3; OPEN 1, OPEN 2; Done-means 2
 Depends on: T1, T5, T6
 Blocked by: none
@@ -263,7 +263,7 @@ Do not touch: the closer, SAM_ui.
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T8: Number and calling-hours guards (must-do 4, OPEN 13, OPEN 14)
-Status: TODO
+Status: DONE 2026-10-26 (errand 91/91 pass, 43 new; core 284, relay 86 unchanged)
 Spec: must-do 4; OPEN 13; OPEN 14; Done-means 3
 Depends on: T4
 Blocked by: none
@@ -282,7 +282,7 @@ Do not touch: anything outside `apps/errand`.
 Proof: before, the test files do not exist. After: the errand suite passes; every row of the table has its expected result.
 
 ## T9: Batch guard and one-errand-at-a-time guard (must-dos 5, 6)
-Status: TODO
+Status: DONE 2026-10-26 (errand 102/102 pass, 11 new; core 284, relay 86 unchanged)
 Spec: must-dos 5, 6; fact F5; OPEN 9; Done-means 4, 5
 Depends on: T5
 Blocked by: none
@@ -302,7 +302,7 @@ Do not touch: `~/.sam/work/amy-speed-test`, systemd.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T10: Errand call create on the Dublin edge (must-do 7)
-Status: TODO
+Status: DONE 2026-10-26 (errand 106/106 pass, 4 new; core 284, relay 86 unchanged)
 Spec: must-do 7; OPEN 3, OPEN 4; Robustness "Failures and timeouts"; Done-means 9 (maximum length on every create)
 Depends on: T2, T4
 Blocked by: none
@@ -323,7 +323,7 @@ Do not touch: `packages/core/src/integrations/twilio.ts`.
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T11: The dial step `errand dial` (must-dos 3 to 7, 18)
-Status: TODO
+Status: DONE 2026-10-26 (errand 121/121 pass, 15 new; mutation: 21 fail incl. the 4 go dial tests, restored go.ts diff empty; core 284, relay 86 unchanged)
 Spec: must-dos 3, 4, 5, 6, 7, 18; Done-means 2, 4, 5, 14, 20
 Depends on: T7, T8, T9, T10
 Blocked by: none
@@ -351,7 +351,7 @@ Proof: before, the test file does not exist. After: the errand suite passes; the
 identical to the committed code (`git diff` on `go.ts` empty).
 
 ## T12: Errand server: own process, own endpoints, Twilio signatures fail closed (must-dos 20, 21)
-Status: TODO
+Status: DONE 2026-10-26 (errand 137/137 pass, 16 new; core 284, relay 86 unchanged; public-hostname refusals owed to SAM at T23)
 Spec: must-dos 20, 21; Done-means 17
 Depends on: T4
 Blocked by: none
@@ -372,7 +372,7 @@ Do not touch: `apps/relay`.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T13: Call instructions (TwiML) endpoint: person or machine (must-dos 8, 14)
-Status: TODO
+Status: DONE 2026-10-26 (errand 145/145 pass, 8 new; core 284, relay 86 unchanged; live detection proofs owed to SAM at T25/T28)
 Spec: must-dos 8, 14; fact F2; OPEN 4, 5, 6; Done-means 6, 11
 Depends on: T2, T5, T12
 Blocked by: none
@@ -394,7 +394,7 @@ Do not touch: `apps/web/src/lib/conversation-relay.ts` (copy its values; never i
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T14: Guardrails checked in code (must-dos 9, 10, 11, 15)
-Status: TODO
+Status: DONE 2026-10-26 (errand 156/156 pass, 11 new; core 284, relay 86 unchanged)
 Spec: must-dos 9, 10, 11, 15; Done-means 7, 8
 Depends on: T5
 Blocked by: none
@@ -418,7 +418,7 @@ Do not touch: `packages/core/src/domain/handover.ts` and its patterns (the recep
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T15: Turn engine and the errand prompt (must-dos 8, 9, 12, 13, 15)
-Status: TODO
+Status: DONE 2026-10-26 (errand 173/173 pass, 17 new; core 284, relay 86 unchanged)
 Spec: must-dos 8, 9, 12, 13, 15; OPEN 3, OPEN 10, OPEN 17; Done-means 7, 9
 Depends on: T2, T14
 Blocked by: none
@@ -446,7 +446,7 @@ Do not touch: `packages/core/src/ai/google.ts`, the receptionist prompts.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T16: Errand socket session: person, menus and voicemail (must-dos 8, 12, 13, 14)
-Status: TODO
+Status: DONE 2026-10-26 (errand 184/184 pass, 11 new; core 284, relay 86 unchanged; live voicemail and wait-first proofs owed to SAM at T26/T28)
 Spec: must-dos 8, 12, 13, 14, 17; fact F1; Done-means 7, 9, 11
 Depends on: T12, T13, T15
 Blocked by: none
@@ -471,7 +471,7 @@ Do not touch: `apps/relay/src` (including its `RelaySession`).
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T17: Status callback, outcome and the Telegram report (must-dos 16, 17, 18)
-Status: TODO
+Status: DONE 2026-10-26 (errand 202/202 pass, 18 new; core 284, relay 86 unchanged; live 2-minute Telegram owed to SAM at T25-T29)
 Spec: must-dos 12 (outcome says which limit), 16, 17, 18; Robustness "Monitoring and alerts"; Done-means 12, 14
 Depends on: T5, T12, T16
 Blocked by: none
@@ -496,7 +496,7 @@ Do not touch: `notify-colin.sh`.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T18: Watchdog and retention (must-do 19, OPEN 12)
-Status: TODO
+Status: DONE 2026-10-26 (errand 209/209 pass, 7 new; core 284, relay 86 unchanged)
 Spec: must-do 19; OPEN 12; Robustness "Backups and restore", "Monitoring and alerts"; Done-means 15
 Depends on: T5, T17
 Blocked by: none
@@ -515,7 +515,7 @@ Do not touch: `sam-backup`, the live calls folder.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T19: The `errand` command line for SAM
-Status: TODO
+Status: DONE 2026-10-26 (errand 235/235 pass, 26 new; core 284, relay 86 unchanged)
 Spec: must-dos 1, 2, 3, 17; Won't do ("chat in, Telegram out, files on disk")
 Depends on: T6, T11, T17, T18
 Blocked by: none
@@ -533,7 +533,7 @@ Do not touch: `~/.local/bin` (the wrapper is installed at T22).
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T20: Unit files, keystore rows, tunnel rule and runbook, staged in the repo (must-do 22, rollback)
-Status: TODO
+Status: DONE 2026-10-26 (errand 243/243 pass, 8 new; core 284, relay 86 unchanged; keystore column format and with-secrets path owed to SAM at T22)
 Spec: must-dos 20, 22; Robustness "Rollback", "Auth and secrets", "Backups and restore"; Done-means 18, 20
 Depends on: T12, T18, T19
 Blocked by: none
@@ -559,7 +559,7 @@ Do not touch: `~/.config/systemd/user`, `~/.cloudflared`, `~/.sam/consumer-map.t
 Proof: before, `apps/errand/deploy` does not exist. After: the seven files exist, the rule test passes, and the runbook names each GATE step.
 
 ## T21: Suites green, boundary diff, mutation check and commit
-Status: TODO
+Status: DONE 2026-10-26 (core 284, relay 86 = T4 baseline; errand 243/243; web typecheck clean; boundary diff empty; mutation 23 fail, go.ts restored identical; branch cloud/errand-caller, pushed; Atwood gate not available in the cloud, owed to SAM)
 Spec: must-do 20; Done-means 2 (mutation check), 16 (code part)
 Depends on: T4 to T20
 Blocked by: none

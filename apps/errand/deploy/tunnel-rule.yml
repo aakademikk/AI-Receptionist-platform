@@ -1,0 +1,13 @@
+# STAGED, not applied. The one ingress rule the errand path needs (must-do 22).
+#
+# Insert it into ~/.cloudflared/receptionist.yml BEFORE the host-wide rule for
+# receptionist.atwoodsystems.co.uk (today rule #1), on Colin's go, at T23; then
+# `cloudflared tunnel --config ~/.cloudflared/receptionist.yml ingress validate`, restart
+# receptionist-tunnel, and read back with `ingress rule` (RUNBOOK.md).
+#
+# It matches exactly the three Twilio-facing paths. /errand/health is deliberately NOT matched,
+# so it stays on the host-wide rule and never reaches the errand process from outside.
+# cloudflared matches `path` against the URL path only, so `?errand=<id>` does not affect it.
+- hostname: receptionist.atwoodsystems.co.uk
+  path: ^/errand/(twiml|status|ws)$
+  service: http://localhost:3003
