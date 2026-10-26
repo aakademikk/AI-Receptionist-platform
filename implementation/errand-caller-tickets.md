@@ -533,7 +533,7 @@ Do not touch: `~/.local/bin` (the wrapper is installed at T22).
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T20: Unit files, keystore rows, tunnel rule and runbook, staged in the repo (must-do 22, rollback)
-Status: TODO
+Status: DONE 2026-10-26 (errand 243/243 pass, 8 new; core 284, relay 86 unchanged; keystore column format and with-secrets path owed to SAM at T22)
 Spec: must-dos 20, 22; Robustness "Rollback", "Auth and secrets", "Backups and restore"; Done-means 18, 20
 Depends on: T12, T18, T19
 Blocked by: none

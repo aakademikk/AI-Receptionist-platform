@@ -521,3 +521,39 @@ Tests: 18 usage-error cases each exit 2; `new` then `status` in a temp `ERRAND_H
 `dial` without a go prints "refused: go: not answered yet", exits 3, 0 creates; `dial --check` prints six lines, 0 creates; `watch`, `prune --dry-run`.
 
 Counts: before core 284 / relay 86 / errand 209; after core 284 / relay 86 / errand 235. All typechecks clean.
+
+## T20: unit files, keystore rows, tunnel rule and runbook, staged — DONE (two details owed to SAM)
+
+Files (new, nothing installed): `apps/errand/deploy/atwood-errand.service`, `errand-prune.service`, `errand-prune.timer`, `errand` (CLI wrapper, mode
+755), `keystore-rows.tsv`, `tunnel-rule.yml`, `RUNBOOK.md`; `apps/errand/src/deploy.test.ts`.
+
+- `atwood-errand.service`: modelled on `atwood-relay.service`; `ExecStart=/home/col/.local/bin/with-secrets --as errand-caller --
+  /home/col/.local/node/bin/node --experimental-strip-types src/server.ts` in `apps/errand`; `Environment=ERRAND_PORT=3003`, `NODE_ENV=production`;
+  `Restart=always`; `NoNewPrivileges=yes`, `PrivateTmp=yes`, `LimitCORE=0`. No env file.
+- `errand-prune.timer`: `OnCalendar=*-*-* 04:40:00`, `Persistent=true` (after `sam-backup` at 04:16), running `errand-prune.service` → `~/.local/bin/errand prune`.
+- `errand`: `exec with-secrets --as errand-caller -- <tarball node> --experimental-strip-types .../apps/errand/src/cli.ts "$@"`.
+- `keystore-rows.tsv`: consumer `errand-caller`; grants `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_BASE_URL`, `GOOGLE_API_KEY` by name; launch, tool,
+  restart, health and status rows. Names only.
+- `tunnel-rule.yml`: one rule, `hostname: receptionist.atwoodsystems.co.uk`, `path: ^/errand/(twiml|status|ws)$`, `service: http://localhost:3003`,
+  to go before the host-wide rule; `/errand/health` deliberately unmatched.
+- `RUNBOOK.md`: T22 deploy steps, T23 tunnel add and read-back, a line for each of T24 to T33, rollback (stop and disable, remove the rule, restart the
+  tunnel, `/relay` 426, `/api/health` 200, "errand service down"), restore, the base commit from facts C1 and the before figures.
+
+Owed to SAM (cannot be read in the container):
+1. **The keystore map's column format.** `~/.sam/consumer-map.tsv` is not in the repo, so the rows could not be written "in the map's format". They are a
+   self-describing `consumer<TAB>kind<TAB>entry` table with a header note saying so; SAM matches them to the live layout at T22 step 3 and runs
+   `with-secrets --check-wiring`.
+2. **`with-secrets` path and calling convention.** Assumed `/home/col/.local/bin/with-secrets --as errand-caller -- <command>`. If the live tool lives
+   elsewhere or takes no `--`, the unit's `ExecStart`, the wrapper and the tsv rows need the same one-line change.
+
+Proof:
+```
+# before (apps/errand/deploy moved aside): # tests 243  # pass 235  # fail 8
+# after:                                   # tests 243  # pass 243  # fail 0     typecheck exit 0
+```
+Tests: the seven files exist; the rule parses to one rule for the hostname on port 3003; its path regex matches `/errand/twiml`, `/errand/status`,
+`/errand/ws` and not `/relay`, `/api/health`, `/errand/health` or near misses; the unit launches through `with-secrets --as errand-caller` with the
+tarball Node and carries port 3003 and the hardening; the timer is 04:40; the wrapper is executable and goes through `with-secrets`; the keystore
+rows grant exactly the four names with no `NAME=value`; the runbook names T22 to T33, the rollback, the restore and the base commit.
+
+Counts: before core 284 / relay 86 / errand 235; after core 284 / relay 86 / errand 243. All typechecks clean.

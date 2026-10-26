@@ -1,0 +1,33 @@
+[Unit]
+Description=Atwood Errand: the errand caller's own process (call instructions, status, socket)
+Documentation=file:/home/col/receptionist-platform/apps/errand/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/col/receptionist-platform/apps/errand
+
+# Launched through the keystore, as the consumer map's lint expects: a launch row must contain
+# `with-secrets --as <ID>`. with-secrets supplies TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+# TWILIO_API_BASE_URL and GOOGLE_API_KEY by name (deploy/keystore-rows.tsv); no env file is read
+# and nothing is printed.
+#
+# The tarball Node, not the system one: `/usr/bin/node` accepts `--experimental-strip-types` and
+# then silently does nothing, which reads as a syntax error in our code. Absolute paths, because
+# `~/.local/node/bin` is not on systemd's PATH.
+ExecStart=/home/col/.local/bin/with-secrets --as errand-caller -- /home/col/.local/node/bin/node --experimental-strip-types src/server.ts
+
+Restart=always
+RestartSec=5
+Environment=ERRAND_PORT=3003
+Environment=NODE_ENV=production
+
+# Light hardening, matching atwood-relay.service. ProtectHome is not set: the errand folders and
+# the closer store live under /home/col/.sam. No core dumps: a dump would hold the secrets in memory.
+NoNewPrivileges=yes
+PrivateTmp=yes
+LimitCORE=0
+
+[Install]
+WantedBy=default.target

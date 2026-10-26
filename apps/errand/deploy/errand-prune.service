@@ -1,0 +1,12 @@
+[Unit]
+Description=Atwood Errand: remove errand folders older than 90 days
+Documentation=file:/home/col/receptionist-platform/apps/errand/README.md
+
+[Service]
+Type=oneshot
+# `errand prune` needs no secret, but goes through the same wrapper as every errand command so
+# there is one way to run the CLI.
+ExecStart=/home/col/.local/bin/errand prune
+NoNewPrivileges=yes
+PrivateTmp=yes
+LimitCORE=0
