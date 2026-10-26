@@ -269,3 +269,39 @@ Note: a create that *times out* may still have been placed by Twilio. Per the ti
 the outcome is write-once, so a later status callback for such a call is logged but does not change it. Flagged for SAM below.
 
 Counts: before core 284 / relay 86 / errand 106; after core 284 / relay 86 / errand 121. All typechecks clean.
+
+## T12: errand server, own endpoints, fail-closed signatures — DONE
+
+Files (new): `apps/errand/src/server.ts`, `apps/errand/src/signature.ts`, `apps/errand/src/server.test.ts`, `apps/errand/src/signature.test.ts`;
+`apps/errand/src/testing/fixtures.ts` (edit: `twilioSign`, `listen`, `postForm`, test token).
+
+- `signature.ts`: `publicUrlFor()` rebuilds the signed URL with core's `reconstructTwilioUrl` from the fixed `PUBLIC_ORIGIN` plus the request's
+  path and query (never from headers); `verifyWebhook()` runs core's `validateTwilioSignature` under each configured token (primary, and secondary in
+  a rotation); `verifySocket()` offers `wss://` then `https://` of the socket URL with no params, as the relay does (read, not imported), and reports
+  which form matched.
+- `server.ts`: `createErrandServer(deps)` (HTTP + `ws` with `noServer`), handlers injected. `POST /errand/twiml` and `POST /errand/status`: body
+  capped at 64 KB, form parsed with core's `parseTwilioForm`, signature checked; no token, no header or a mismatch → 403, empty body, one log line.
+  Errand ids validated with the T5 regex and checked to exist; an unknown/bad id on `/errand/twiml` gets core's hang-up TwiML. Status always 200
+  once signed. Upgrade only on `/errand/ws`, refused as HTTP 403 with no upgrade when unsigned or wrong; accepted upgrades log `signedUrlForm`.
+  `GET /errand/health` → 200 `{ ok: true }` only from loopback with no `CF-Connecting-IP`, else 404. Everything else 404. `main()` binds
+  127.0.0.1:`ERRAND_PORT` (env override), refuses to start without `TWILIO_AUTH_TOKEN`, closes cleanly on SIGINT/SIGTERM. Logs are JSON lines,
+  CallSids masked, no token or body logged.
+
+Proof:
+```
+# before (server.ts and signature.ts moved aside): # tests 123  # pass 121  # fail 2
+Cannot find module '.../apps/errand/src/server.ts'
+Cannot find module '.../apps/errand/src/signature.ts'
+# after: # tests 137  # pass 137  # fail 0     typecheck exit 0
+# local smoke (container only, dummy token, port 3993):
+{"message":"Errand service listening","port":3993}
+{"ok":true} 200
+{"message":"Errand service cannot start","reason":"TWILIO_AUTH_TOKEN is not set"}
+```
+Tests (known test token, real HTTP on an ephemeral loopback port): for each of `/errand/twiml` and `/errand/status`, unsigned → 403 empty,
+wrongly signed → 403 empty, tampered body → 403, signed → 200 and the handler runs once; no token configured → 403; socket upgrade unsigned → 403,
+wrong → 403, signed → 101; bad/unknown ids get a hang-up and never reach the handler; other paths 404; health 200 locally, 404 with `CF-Connecting-IP`.
+
+Done-means 17 through the *public hostname* is owed to SAM (T23); these tests prove the same refusals on the process itself.
+
+Counts: before core 284 / relay 86 / errand 121; after core 284 / relay 86 / errand 137. All typechecks clean.

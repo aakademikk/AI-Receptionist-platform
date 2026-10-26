@@ -351,7 +351,7 @@ Proof: before, the test file does not exist. After: the errand suite passes; the
 identical to the committed code (`git diff` on `go.ts` empty).
 
 ## T12: Errand server: own process, own endpoints, Twilio signatures fail closed (must-dos 20, 21)
-Status: TODO
+Status: DONE 2026-10-26 (errand 137/137 pass, 16 new; core 284, relay 86 unchanged; public-hostname refusals owed to SAM at T23)
 Spec: must-dos 20, 21; Done-means 17
 Depends on: T4
 Blocked by: none
