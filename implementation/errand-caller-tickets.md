@@ -302,7 +302,7 @@ Do not touch: `~/.sam/work/amy-speed-test`, systemd.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T10: Errand call create on the Dublin edge (must-do 7)
-Status: TODO
+Status: DONE 2026-10-26 (errand 106/106 pass, 4 new; core 284, relay 86 unchanged)
 Spec: must-do 7; OPEN 3, OPEN 4; Robustness "Failures and timeouts"; Done-means 9 (maximum length on every create)
 Depends on: T2, T4
 Blocked by: none

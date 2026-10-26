@@ -202,3 +202,26 @@ its PID; several blockers named at once; an empty listing passes; four runner-er
 (Done-means 5); an outcome clears it; the 13-minute cut-off is exact. `runCommand` checked against `node -e` (harmless local process).
 
 Counts: before core 284 / relay 86 / errand 91; after core 284 / relay 86 / errand 102. All typechecks clean.
+
+## T10: errand call create on the Dublin edge — DONE
+
+Files (new): `apps/errand/src/twilio-call.ts`, `apps/errand/src/twilio-call.test.ts`.
+
+`createErrandCall({ errandId, to }, deps)`: `POST ${requireTwilioBase()}/Accounts/<sid>/Calls.json` with exactly `From` = `ROBOT_NUMBER`, `To`,
+`Url` = `https://receptionist.atwoodsystems.co.uk/errand/twiml?errand=<id>`, `Method` POST, `StatusCallback` = `.../errand/status?errand=<id>`,
+`StatusCallbackEvent` `initiated ringing answered completed`, `StatusCallbackMethod` POST, `MachineDetection` `DetectMessageEnd`, `Timeout` 30,
+`TimeLimit` 480. Never `Record`, `AsyncAmd` or `Twiml`. Abort at `CALL_CREATE_TIMEOUT_MS` (setTimeout + AbortController), never retried. Returns the
+CallSid or `{ failure: timeout | rejected (HTTP status + Twilio code) | other }`. Base, SID, token and errand id are all checked before any request;
+the SID and token are never logged or returned. Core's `placeCall` is untouched.
+
+Proof:
+```
+# before (twilio-call.ts moved aside): # tests 103  # pass 102  # fail 1
+Cannot find module '.../apps/errand/src/twilio-call.ts'
+# after: # tests 106  # pass 106  # fail 0     typecheck exit 0
+```
+Tests (fake `fetch` counting requests): body equals the ten locked parameters exactly, no `Record` / `AsyncAmd` / `Twiml`; URL host is the configured
+Dublin base; empty base, the global host, missing credentials and a bad id each throw with 0 requests; a slow fake (mock timers) is still pending at
+14 999 ms, aborted at 15 000 ms as `timeout`, request count stays 1; a 400 returns `rejected` with Twilio's code; a network error returns `other`.
+
+Counts: before core 284 / relay 86 / errand 102; after core 284 / relay 86 / errand 106. All typechecks clean.
