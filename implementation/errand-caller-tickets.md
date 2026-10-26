@@ -418,7 +418,7 @@ Do not touch: `packages/core/src/domain/handover.ts` and its patterns (the recep
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T15: Turn engine and the errand prompt (must-dos 8, 9, 12, 13, 15)
-Status: TODO
+Status: DONE 2026-10-26 (errand 173/173 pass, 17 new; core 284, relay 86 unchanged)
 Spec: must-dos 8, 9, 12, 13, 15; OPEN 3, OPEN 10, OPEN 17; Done-means 7, 9
 Depends on: T2, T14
 Blocked by: none

@@ -368,3 +368,39 @@ agreements are blocked; five ordinary Amy lines pass; 18:59 and 20:31 are refuse
 is Colin's mobile.
 
 Counts: before core 284 / relay 86 / errand 145; after core 284 / relay 86 / errand 156. All typechecks clean.
+The first relay run at T14 hit the known flake again (85/86, same `probe one ... 4,000 ms` test); the re-run straight after gave 86/86.
+
+## T15: turn engine and the errand prompt — DONE
+
+Files (new): `apps/errand/src/prompt.ts`, `apps/errand/src/turn.ts`, `apps/errand/src/turn.test.ts`, `apps/errand/src/prompt.test.ts`.
+
+- `prompt.ts`: `buildErrandPrompt(brief)`: who Amy calls for, the business, goal, window (readable and `HH:MM` bounds), details, Colin's name and
+  mobile, any added limits; nine rules (exact opening line, say automated assistant if asked, inside the window only, only Colin's details and
+  "Colin will give that to you directly.", no payment, nothing beyond the goal and no second goal, menus by keypad digits, `cannotPlace`, the turn
+  cap); the JSON reply shape `{ say, digits?, agreedTime?, offeredTimes?, reference?, nameBookedUnder?, done?: "booked"|"not_booked", reason?,
+  cannotPlace? }`. `DECISION_SCHEMA` is the same shape as structured output. (`reason` is an addition to the ticket's shape so a "not booked" can say why.)
+- `turn.ts`: `nextTurn(state, theirWords, { model })` in the ticket's order: count the turn → `checkTheirWords` payment → fixed ring-off line,
+  `ended_early` / `payment asked`, model never called → model with an 8 s race (timeout, error or malformed reply → "Sorry, I'll have to call back
+  another time. Goodbye.", `failed`) → offered and agreed times through `checkAgreedTime` (an outside agreed time is refused and the line replaced
+  by a polite ask for a time inside the window) → `checkAmyLine` → `cannotPlace` twice in a row → `ended_early` / `confused` → `done: booked` (only
+  with an agreed time inside the window) or `not_booked` (with offered times) → turn 20 → `ended_early` / `turn cap` → digits filtered to `0-9*#`
+  (dropped characters reported). Disclosure in code: the first non-empty line starts with `OPENING_LINE` (prefixed if missing); when their words ask
+  whether she is a person/robot/computer the line must contain "automated assistant" (prefixed if missing). A keys-only turn counts towards the cap
+  and is not Amy's first spoken line. `googleModel(apiKey)` wraps core's `GoogleProvider` with `ERRAND_MODEL` `gemini-3.8-flash`, effort `low`,
+  the schema and `timeoutMs` 8000. `packages/core/src/ai/google.ts` untouched.
+
+Proof:
+```
+# before (turn.ts and prompt.ts moved aside): # tests 158  # pass 156  # fail 2
+Cannot find module '.../apps/errand/src/prompt.ts'
+Cannot find module '.../apps/errand/src/turn.ts'
+# after (one typecheck fix in the test's fake model): # tests 173  # pass 173  # fail 0     typecheck exit 0
+```
+Tests (fake model): the first line starts with the opening line and is not doubled; "are you a real person?" gets "automated assistant"; an outside
+time (18:00) then an inside time (19:30) ends `booked` 19:30 with name and reference, 18:00 recorded as offered; only outside times → `not_booked` with
+them; a `booked` with an outside time does not end as booked; the 20th turn ends `turn cap` (19 do not); two `cannotPlace` in a row end `confused`,
+separated ones do not; a model taking 9 s ends `failed` at 8 s (mock timers); an error or malformed reply ends `failed`; a payment ask ends with 0
+model calls; the robot number and a membership agreement are replaced; digits "1w#" become "1#" with "w" reported; `googleModel` sends the locked model,
+effort, timeout and schema to a fake provider (no real key, no network).
+
+Counts: before core 284 / relay 86 / errand 156; after core 284 / relay 86 / errand 173. All typechecks clean.
