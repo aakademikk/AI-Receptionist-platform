@@ -496,7 +496,7 @@ Do not touch: `notify-colin.sh`.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T18: Watchdog and retention (must-do 19, OPEN 12)
-Status: TODO
+Status: DONE 2026-10-26 (errand 209/209 pass, 7 new; core 284, relay 86 unchanged)
 Spec: must-do 19; OPEN 12; Robustness "Backups and restore", "Monitoring and alerts"; Done-means 15
 Depends on: T5, T17
 Blocked by: none

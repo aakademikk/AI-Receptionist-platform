@@ -471,3 +471,25 @@ signed `no-answer` settles and reports once.
 Done-means 12 (each live test's Telegram within 2 minutes of Twilio's end time) is owed to SAM (T25 to T29).
 
 Counts: before core 284 / relay 86 / errand 184; after core 284 / relay 86 / errand 202. All typechecks clean.
+
+## T18: watchdog and retention — DONE
+
+Files (new): `apps/errand/src/watch.ts`, `apps/errand/src/prune.ts`, `apps/errand/src/watch.test.ts`, `apps/errand/src/prune.test.ts`.
+
+- `watch(errandId, now, { notify })`: `outcome.json` present → `outcome present`, silent; never dialled → `not dialled`; under `NO_OUTCOME_ALERT_MS`
+  since the `dialled` event → `too early` (an early timer does nothing); otherwise `alert.json` by exclusive create, then one alert "Errand <id> dialled
+  at <HH:MM UK> has no outcome after 20 minutes" through the injected notifier and an `alert_sent` event; a second run → `already alerted`.
+- `prune(now, { dryRun })`: removes folders whose id date is more than `RETENTION_DAYS` (90) days before `now`; a folder with no outcome dialled less
+  than a day ago is never removed; paths only from validated ids; `describePrune()` prints the count and ids ("removed" / "would remove").
+
+Proof:
+```
+# before (watch.ts and prune.ts moved aside): # tests 204  # pass 202  # fail 2
+Cannot find module '.../apps/errand/src/prune.ts'
+Cannot find module '.../apps/errand/src/watch.ts'
+# after: # tests 209  # pass 209  # fail 0     typecheck exit 0
+```
+Tests (fake clock, Done-means 15): 19 min 59 s no alert; 20 min one alert with the errand id and dial time; a second run no second alert; outcome
+present no alert; never dialled no alert. Prune: 91 days removed, 89 and exactly 90 kept, dry run removes nothing, a fresh undialled-outcome folder kept.
+
+Counts: before core 284 / relay 86 / errand 202; after core 284 / relay 86 / errand 209. All typechecks clean.
