@@ -596,7 +596,7 @@ Do not touch: the tunnel, the Twilio numbers, the relay, the web app, the env fi
 Proof: before, `deploy.md` does not exist. After: it records the commit, the health answer, the unit start time, both unchanged PIDs and the timer.
 
 ## T23: GATE: the errand tunnel rule (must-do 22, Colin's go)
-Status: TODO
+Status: DONE 2026-10-26 23:49 GMT on Colin's yes (w_64d04128), one deviation: refused WebSocket upgrades read 502 at the Cloudflare edge on most tries (403 at the origin every time; the relay shows the same). Record ~/.sam/work/errand-caller/tunnel.md
 Spec: must-dos 21, 22; Done-means 17, 18
 Depends on: T22
 Blocked by: Colin's go
