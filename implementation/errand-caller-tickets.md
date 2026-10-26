@@ -175,7 +175,7 @@ and the ingress results.
 # The errand path (build agents, nothing live)
 
 ## T4: Package scaffold `apps/errand` with the locked values and a boundary test
-Status: TODO
+Status: DONE 2026-10-26 (errand 7/7 pass, typecheck clean; core 284, relay 86 unchanged; boundary mutation 6 pass 1 fail, reverted)
 Spec: must-do 20; Rules above; locked decisions
 Depends on: T2
 Blocked by: none
