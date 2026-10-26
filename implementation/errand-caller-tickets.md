@@ -578,7 +578,7 @@ Proof: before, the report does not exist. After: it records the four suites' cou
 # Live (GATE: SAM with Colin, never a build agent)
 
 ## T22: GATE: deploy the errand service (Colin's go)
-Status: TODO
+Status: DONE 2026-10-26 20:39 GMT on Colin's go (w_1318527d). Fix commit 5972b40; health 200; relay and prod PIDs unchanged; record in ~/.sam/work/errand-caller/deploy.md
 Spec: must-dos 20, 21; Robustness "Auth and secrets", "Backups and restore"; Done-means 16 (PID), 20 (service part)
 Depends on: T3, T21
 Blocked by: Colin's go
