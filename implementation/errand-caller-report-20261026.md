@@ -88,3 +88,33 @@ Tests cover: bad ids refused before any path is built (and nothing created); a t
 changes, `answered` with `AnsweredBy`, digits), transcript and outcome in the folder, all mode 600.
 
 Counts: before core 284 / relay 86 / errand 7; after core 284 / relay 86 / errand 23. All typechecks clean.
+
+## T6: read-back message and the Go question — DONE
+
+Files (new):
+- `apps/errand/src/readback.ts`: `renderReadback(brief, dialNumber)`: one message, fixed line order (business, number as dialled in
+  E.164 and spaced, goal, kind, window "Wed 28 Oct, between 19:00 and 20:30", each detail, name and mobile Amy may give, limits, `Brief #<first 8
+  of hash>`, closing line "Tap Go to place this call. Nothing dials without it."). `spacedUkNumber`, `renderWindow`, `hashTag`.
+  `sendReadback(errandId, deps)`: validates the stored brief, runs the injected number check (a refusal stops with its reason; nothing created,
+  nothing sent, no `readback.json`), creates the Go question by facts A2/A4 (`choice2`, options `Go`/`Cancel`, `gated: true`,
+  `acceptAction: none`, `source: errand`, `state: open`, `createdAt` UTC to the second, text = the read-back on one line) in job
+  `job_errand-<errand id>_<YYYYMMDD-HHMMSS>`, writes `readback.json` (text, brief hash, dial number, question id, job id, question text and
+  options, sent time) *before* notifying, then calls the notifier once with `--question`, `--options Go|Cancel`, `--job`, `--full <read-back>`;
+  the exit code goes into a `readback_sent` event. Live defaults: `createQuestionInStore()` (closer.json written atomically, temp + fsync +
+  rename, waiting-on-colin precedent) and `runNotifier()` (`execFile`, no shell).
+- `apps/errand/src/readback.test.ts`.
+
+Note (ordering): T6 needs T8's normaliser, which is built later. The number check is an injected `NumberCheck`; T6's tests use a fake,
+and T8 supplies the real one (wired by the CLI in T19). The Go question is `gated: true` as facts A4 recommends.
+
+Proof:
+```
+# before (readback.ts moved aside): # tests 24  # pass 23  # fail 1
+Cannot find module '/home/user/AI-Receptionist-platform/apps/errand/src/readback.ts'
+# after: # tests 30  # pass 30  # fail 0      typecheck exit 0
+```
+Tests: every brief field appears in the text; the number line equals the dialled E.164 exactly; `readback.json` holds the hash, question id and job id;
+a refused number sends nothing and writes no read-back; the notifier is called once with the question id, options, job id and full text; a notifier
+failure is recorded and the read-back kept; the live question writer makes a closer.json holding only the question, and refuses a bad job id.
+
+Counts: before core 284 / relay 86 / errand 23; after core 284 / relay 86 / errand 30. All typechecks clean.

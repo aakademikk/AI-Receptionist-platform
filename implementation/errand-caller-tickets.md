@@ -222,7 +222,7 @@ Do not touch: anything outside `apps/errand`.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before (module absent).
 
 ## T6: Read-back message and the Go question
-Status: TODO
+Status: DONE 2026-10-26 (errand 30/30 pass, 7 new; core 284, relay 86 unchanged)
 Spec: must-dos 2, 3; OPEN 1; Done-means 1
 Depends on: T1, T5
 Blocked by: none
