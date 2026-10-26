@@ -404,3 +404,37 @@ model calls; the robot number and a membership agreement are replaced; digits "1
 effort, timeout and schema to a fake provider (no real key, no network).
 
 Counts: before core 284 / relay 86 / errand 156; after core 284 / relay 86 / errand 173. All typechecks clean.
+
+## T16: errand socket session, person / menus / voicemail — DONE
+
+Files: `apps/errand/src/session.ts` (new), `apps/errand/src/session.test.ts` (new), `apps/errand/src/server.ts` (edit: the default socket handler
+is now `attachSession(ws, …)`, which parses JSON frames (non-JSON dropped and logged, never thrown), runs one `ErrandSession` and disposes it on
+close; `ServerDeps.model` added; `lazyGoogleModel()` builds the Gemini model on first use from `GOOGLE_API_KEY`, so a missing key fails one call
+with the fixed line and outcome "failed" rather than the service at boot).
+
+`ErrandSession` declares its own inbound/outbound frame types (facts B3; nothing imported from the relay). On `setup` it reads `errandId`,
+`answeredBy`, `mode` from `customParameters`; an unknown errand gets `end` at once. Person mode sends nothing until the first final prompt, then per
+final prompt: `them` transcript line → `nextTurn` → `text` (last true) → `sendDigits` with a `digits` event → `amy` transcript line; guard and
+dropped-digit events; on an ending decision the outcome is written (source `session`, write-once) and `end` is sent after the play allowance
+(`PLAY_MS_PER_WORD` 400 ms per word, floor `PLAY_MS_MIN` 1500 ms; named constants in `config.ts`). Partial prompts ignored; turns run one at a time
+in order; prompts after the end ignored; inbound `dtmf` logged as `dtmf_in`. Voicemail mode sends one `text` (`OPENING_LINE` + "I'm calling to <goal>,
+<window>." + "Please call Colin back on <mobile>. Thank you, goodbye."), outcome `voicemail_left`, `end` after the allowance, every prompt ignored and
+the model never called. A timer at `MAX_CALL_S` − 10 s says the ring-off line and ends `ended_early` / `maximum length`. A socket close with no
+outcome logs `socket_closed` and leaves the outcome to the status callback. The session never notifies.
+
+Proof:
+```
+# before (session.ts moved aside, server.ts at its T13 version): # tests 174  # pass 173  # fail 1
+Cannot find module '.../apps/errand/src/session.ts'
+# first run after: 3 files failed: "TypeScript parameter property is not supported in strip-only mode" (constructor
+#   parameter property) -> rewritten as a plain field; then 1 file failed: the server-side socket close wrote an event
+#   after the test's temp folder was removed -> dispose() now swallows a missing folder, and the test waits for the close.
+# after: # tests 184  # pass 184  # fail 0  (three consecutive runs)     typecheck exit 0
+```
+Tests (fake socket, fake model, mock timers): no frame before the first final prompt, partials ignored; transcript has speaker, words and time for
+every turn; an ending decision writes `booked` and sends `end` only after the allowance, later prompts ignored; a payment ask ends `payment asked`;
+a menu prompt producing digits sends `sendDigits` and logs `digits`; inbound DTMF logged; voicemail sends exactly one `text` then `end`, ignores a
+later prompt, never calls the model, outcome `voicemail_left`; the max-length timer fires at 470 000 ms, not at 469 999, with its outcome; an unknown
+errand ends at once; a close with no outcome leaves none; and end to end over a signed socket on the real server.
+
+Counts: before core 284 / relay 86 / errand 173; after core 284 / relay 86 / errand 184. All typechecks clean.

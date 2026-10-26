@@ -446,7 +446,7 @@ Do not touch: `packages/core/src/ai/google.ts`, the receptionist prompts.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T16: Errand socket session: person, menus and voicemail (must-dos 8, 12, 13, 14)
-Status: TODO
+Status: DONE 2026-10-26 (errand 184/184 pass, 11 new; core 284, relay 86 unchanged; live voicemail and wait-first proofs owed to SAM at T26/T28)
 Spec: must-dos 8, 12, 13, 14, 17; fact F1; Done-means 7, 9, 11
 Depends on: T12, T13, T15
 Blocked by: none

@@ -5,9 +5,11 @@ import { buildHangupTwiml, parseTwilioForm } from '@atwood/core/integrations/twi
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { ERRAND_PORT, HEALTH_PATH, SOCKET_PATH, STATUS_PATH, TWIML_PATH, errandHome, maskSid } from './config.ts';
+import { ErrandSession, type InboundFrame } from './session.ts';
 import { verifySocket, verifyWebhook } from './signature.ts';
 import { errandTwiml } from './twiml.ts';
 import { errandExists, isErrandId } from './store.ts';
+import { type ModelFn, googleModel } from './turn.ts';
 
 /**
  * The errand server: its own process, its own endpoints (must-dos 20, 21).
@@ -51,8 +53,10 @@ export interface ServerDeps {
   twiml?: (errandId: string, params: Record<string, string>) => string;
   /** A status change for a known errand id (T17). */
   status?: (errandId: string, params: Record<string, string>) => Promise<void> | void;
-  /** A signed socket, one call (T16). */
+  /** A signed socket, one call. Defaults to an `ErrandSession` (T16). */
   connection?: (ws: WebSocket, request: IncomingMessage) => void;
+  /** The model behind the default session. Defaults to Amy's Gemini flash with `GOOGLE_API_KEY`. */
+  model?: ModelFn;
 }
 
 /** Twilio's form bodies are small; anything bigger is not Twilio. */
@@ -97,7 +101,7 @@ export function createErrandServer(deps: ServerDeps): { server: Server; sockets:
   const log = deps.log ?? jsonLog;
   const twiml = deps.twiml ?? ((errandId: string, params: Record<string, string>) => errandTwiml(errandId, params, { home }));
   const status = deps.status ?? (() => undefined);
-  const connection = deps.connection ?? ((ws: WebSocket) => ws.close(1000, 'no session handler'));
+  const connection = deps.connection ?? ((ws: WebSocket) => attachSession(ws, { home, log, model: deps.model ?? lazyGoogleModel() }));
 
   const server = createServer((request, response) => {
     void handle(request, response).catch((error: unknown) => {
@@ -179,6 +183,55 @@ export function createErrandServer(deps: ServerDeps): { server: Server; sockets:
   });
 
   return { server, sockets };
+}
+
+/**
+ * Run one `ErrandSession` on a signed socket. Frames that are not JSON objects are dropped,
+ * never thrown: an exception on a socket kills a live call, and Twilio tolerates silence.
+ */
+export function attachSession(ws: WebSocket, options: { home: string; log: LogFn; model: ModelFn }): ErrandSession {
+  const session = new ErrandSession({
+    home: options.home,
+    model: options.model,
+    send: (frame) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(frame));
+    },
+  });
+  ws.on('message', (data) => {
+    let frame: unknown;
+    try {
+      frame = JSON.parse(data.toString('utf8'));
+    } catch {
+      frame = null;
+    }
+    if (typeof frame !== 'object' || frame === null || typeof (frame as { type?: unknown }).type !== 'string') {
+      options.log('Errand frame could not be parsed');
+      return;
+    }
+    void session.handle(frame as InboundFrame);
+  });
+  ws.on('error', (error: Error) => options.log('Errand socket error', { message: error.message }));
+  ws.on('close', (code: number) => {
+    session.dispose();
+    options.log('Errand socket closed', { code });
+  });
+  return session;
+}
+
+/**
+ * The live model, built on first use so a missing key fails one call (Amy says the fixed
+ * line and the outcome is "failed") rather than the whole service at boot.
+ */
+function lazyGoogleModel(env: NodeJS.ProcessEnv = process.env): ModelFn {
+  let model: ModelFn | null = null;
+  return (input) => {
+    if (!model) {
+      const key = env.GOOGLE_API_KEY?.trim();
+      if (!key) return Promise.reject(new Error('GOOGLE_API_KEY is not set'));
+      model = googleModel(key);
+    }
+    return model(input);
+  };
 }
 
 /** The account's auth tokens from the environment: primary, then secondary when set. Never logged. */
