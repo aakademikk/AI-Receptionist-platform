@@ -263,7 +263,7 @@ Do not touch: the closer, SAM_ui.
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T8: Number and calling-hours guards (must-do 4, OPEN 13, OPEN 14)
-Status: TODO
+Status: DONE 2026-10-26 (errand 91/91 pass, 43 new; core 284, relay 86 unchanged)
 Spec: must-do 4; OPEN 13; OPEN 14; Done-means 3
 Depends on: T4
 Blocked by: none

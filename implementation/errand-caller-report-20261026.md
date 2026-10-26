@@ -147,3 +147,32 @@ Tests: each refusal above returns its reason; a valid Go (tab, and push) returns
 `markGoUsed` fails.
 
 Counts: before core 284 / relay 86 / errand 30; after core 284 / relay 86 / errand 48. All typechecks clean.
+
+## T8: number and calling-hours guards — DONE
+
+Files (new): `apps/errand/src/guards/number.ts`, `apps/errand/src/guards/hours.ts`, `apps/errand/src/guards/number.test.ts`,
+`apps/errand/src/guards/hours.test.ts`.
+
+- `normaliseUkNumber(input)`: 999 and 112 refused on the bare digits before any normalising (and again as `+44999`); the six-digit 118
+  short form refused as premium (0118 Reading stays geographic); strips spaces, brackets, dots and dashes; `0...` and `0044...` become
+  `+44...`; `+44 (0)...` drops the trunk zero; any other `+` or `00` prefix is "outside the UK". Refusal reasons exactly as the ticket lists:
+  "emergency number", "premium or chargeable" (09, 118xxx), "personal number" (070), "pager" (076), "084/087 refused in the first release",
+  "outside the UK", "not a UK number shape" (anything else, wrong length, 05). Allowed: 01, 02, 03, 071-075 and 077-079, 080; ten national digits
+  (nine allowed for 01 and 080 only). This is the real `NumberCheck` for T6 and T11.
+- `checkCallingHours(now)`: allowed from 08:00 up to but not including 21:00 in `Europe/London`; the refusal says the UK time now.
+
+Proof:
+```
+# before (number.ts and hours.ts moved aside): # tests 50  # pass 48  # fail 2
+Cannot find module '.../apps/errand/src/guards/hours.ts'
+Cannot find module '.../apps/errand/src/guards/number.ts'
+# first run after: # tests 91  # pass 90  # fail 1   ("020 7946 012" accepted as a 9-digit geographic; fixed: nine digits only for 01 and 080)
+# after fix:       # tests 91  # pass 91  # fail 0   typecheck exit 0
+```
+Table (each row is its own test, all pass): refused 999, " 9 9 9 ", 112, +44 999, 0909/+44 909 (premium), 0871/+44 871 and 0845/+44845
+(084/087), "118 118", 118500 (premium), 070/+44 70 (personal), 076/+44 7624 (pager), +33/0033/+1 (outside the UK), too short, too long, 0500,
+words, no trunk zero (shape); allowed 0113/+44 113, 0118, 020 (four spellings incl. `(020) 7946-0123`, `+44 (0)20`, `0044 20`), 0306/+44 306,
+07700/+447700, 07123, 07912, 0808/+44 808, nine-digit 0800. Hours at 07:59 / 08:00 / 20:59 / 21:00 on a GMT date and a BST date, plus a
+UTC-vs-UK check.
+
+Counts: before core 284 / relay 86 / errand 48; after core 284 / relay 86 / errand 91. All typechecks clean.
