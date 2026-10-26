@@ -22,7 +22,7 @@ The rate is a named constant, tuned on the live call (spec check 10). T5 carries
 ---
 
 ## T1: Voice conversations get source `voice_call`
-Status: TODO
+Status: DONE 2026-09-24 (`e4e3c92`); re-verified 2026-10-25, not rebuilt: 3/3 source assertions pass, core 279/279, typecheck clean
 Spec: must-do 7, 8; check 8
 Depends on: none
 Blocked by: none
@@ -43,7 +43,7 @@ Do not touch: any SQL migration, `record_missed_call` and its `'missed_call'` so
 Proof: core test and typecheck green, count = baseline + the new tests; the three new assertions pass.
 
 ## T2: Pure closing-phrase rules and closing lines
-Status: TODO
+Status: DONE 2026-09-24 (`e912cc4`, refined `bd1796f`, `b520639`); re-verified 2026-10-25, not rebuilt: all closing cases pass, core 279/279, typecheck clean
 Spec: must-do 1, 2, 3; checks 1, 2
 Depends on: none
 Blocked by: none
@@ -77,7 +77,7 @@ after ask "no thanks" -> goodbye, after ask second "bye" -> goodbye not ask, aft
 the wrap-up true and false cases.
 
 ## T3: Voice turns use the closing rules
-Status: TODO
+Status: DONE 2026-09-24 (`56d6c40`, refined by the 09-25 commits); re-verified 2026-10-25, not rebuilt: core 279/279, relay 86/86, both typechecks clean
 Spec: must-do 1, 2, 3, 6; checks 1, 2, 7
 Depends on: T2
 Blocked by: none
@@ -113,7 +113,7 @@ Proof: core and relay tests and both typechecks green, counts reported; existing
 If `voice.ts` logic cannot be unit-tested without a database, say so in the report; the decision logic itself is proven by T2.
 
 ## T4: The relay remembers "anything else?" was asked
-Status: TODO
+Status: DONE 2026-09-24 (`3717774`); re-verified 2026-10-25, not rebuilt: 8 "anything else?" cases pass, relay 86/86, typecheck clean
 Spec: must-do 2; check 2
 Depends on: T3
 Blocked by: none
@@ -131,7 +131,7 @@ Do not touch: barge-in and `pendingTurn` logic, `maxTurns`, `parseFrame`, `sanit
 Proof: relay test and typecheck green, count = previous + new tests.
 
 ## T5: Silence backstop in the relay
-Status: TODO
+Status: DONE 2026-09-24 (`cabac33`); re-verified 2026-10-25, not rebuilt: 10 backstop cases pass (a–e covered), relay 86/86, core 279/279; live timing owed to T7
 Spec: must-do 3, 4, 5; checks 3, 4, 5, 6
 Depends on: T4
 Blocked by: none (open question answered above: no playback-finished event, estimate it)
@@ -164,7 +164,7 @@ Do not touch: the greeting/TwiML, the barge-in logic, `maxTurns`, how `handle()`
 Proof: relay test and typecheck green with the five new cases; core suite still green.
 
 ## T6: Full verification and push
-Status: TODO
+Status: DONE 2026-10-25: core 279/279, relay 86/86, both typechecks clean; T1–T5 already on origin/restyle/glassmorphism; this session pushed only to cloud/voice-end-of-call
 Spec: must-do 6; checks 7, 9
 Depends on: T1 to T5
 Blocked by: none
