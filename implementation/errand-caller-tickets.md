@@ -515,7 +515,7 @@ Do not touch: `sam-backup`, the live calls folder.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T19: The `errand` command line for SAM
-Status: TODO
+Status: DONE 2026-10-26 (errand 235/235 pass, 26 new; core 284, relay 86 unchanged)
 Spec: must-dos 1, 2, 3, 17; Won't do ("chat in, Telegram out, files on disk")
 Depends on: T6, T11, T17, T18
 Blocked by: none

@@ -493,3 +493,31 @@ Tests (fake clock, Done-means 15): 19 min 59 s no alert; 20 min one alert with t
 present no alert; never dialled no alert. Prune: 91 days removed, 89 and exactly 90 kept, dry run removes nothing, a fresh undialled-outcome folder kept.
 
 Counts: before core 284 / relay 86 / errand 202; after core 284 / relay 86 / errand 209. All typechecks clean.
+
+## T19: the `errand` command line for SAM — DONE
+
+Files (new): `apps/errand/src/cli.ts`, `apps/errand/src/cli.test.ts`, `apps/errand/SAM.md`.
+
+- `cli.ts`: `runCli(argv, deps)` with subcommands `new <brief.json>` (validate, create, print id; invalid brief exit 3 naming the field; unreadable
+  file exit 1), `readback <id>` (T6, prints the read-back and question id), `dial <id> [--check]` (T11, its lines and exit code; the dial's reporter is
+  `reportOnce`), `status <id>` (brief summary, read-back, Go, every event, transcript, outcome, in plain text), `watch <id>` (T18), `prune [--dry-run]`
+  (T18), `list` (ids with state: new / read back, waiting for Go / go used / dialled, no outcome yet / outcome: …). Bad usage (unknown command, missing or
+  extra arguments, malformed id, unknown flag) exits 2 with the usage. `liveDeps()` wires the real store, `notify-colin.sh`, the closer store, the runner,
+  the health check, `createErrandCall`, the T8 normaliser, and `ERRAND_CLI` (default `~/.local/bin/errand`) as the watchdog command. Runs as a script
+  when executed directly.
+- `SAM.md`: how SAM turns chat into a brief (every must-do 1 field; ask Colin for any missing one; never guess the number or window), runs `new` then
+  `readback`, waits for Colin's tap, runs `dial` once, says any refusal in chat at once, never runs `dial` twice for one Go, never writes the bridge's Go
+  record, and answers questions from `status <id>`.
+
+Proof:
+```
+# before (cli.ts moved aside): # tests 210  # pass 209  # fail 1
+Cannot find module '.../apps/errand/src/cli.ts'
+# after: # tests 235  # pass 235  # fail 0     typecheck exit 0
+# smoke (temp ERRAND_HOME): `errand list` -> "(no errands)" exit 0; `errand` -> usage, exit 2
+```
+Tests: 18 usage-error cases each exit 2; `new` then `status` in a temp `ERRAND_HOME` shows every brief field, events, an empty transcript and no outcome;
+`list`; an invalid brief exits 3 naming `details.partySize`, a missing file exits 1; `readback` sends once and `list` shows "read back, waiting for Go";
+`dial` without a go prints "refused: go: not answered yet", exits 3, 0 creates; `dial --check` prints six lines, 0 creates; `watch`, `prune --dry-run`.
+
+Counts: before core 284 / relay 86 / errand 209; after core 284 / relay 86 / errand 235. All typechecks clean.
