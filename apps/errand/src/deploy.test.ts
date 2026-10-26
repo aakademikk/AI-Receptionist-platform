@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { requireTwilioBase } from './config.ts';
+
 /**
  * The staged deploy files (T20). Nothing here installs anything: the tests read the files the
  * deploy and tunnel GATEs will apply and check they say what the spec needs.
@@ -66,17 +68,33 @@ describe('unit files and wrapper', () => {
     assert.ok((statSync(join(DEPLOY, 'errand')).mode & 0o111) !== 0);
   });
 
-  it('keystore rows grant the four names and carry no value', () => {
+  it('keystore rows are in the live map layout (kind, consumer, field, value) and carry no value', () => {
     const rows = read('keystore-rows.tsv')
       .split('\n')
       .filter((line) => line && !line.startsWith('#'))
       .map((line) => line.split('\t'));
-    const grants = rows.filter((row) => row[1] === 'grant').map((row) => row[2]);
-    assert.deepEqual(grants, ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_API_BASE_URL', 'GOOGLE_API_KEY']);
-    assert.ok(rows.every((row) => row[0] === 'errand-caller' && row.length === 3));
-    for (const kind of ['launch', 'tool', 'restart', 'health', 'status']) assert.ok(rows.some((row) => row[1] === kind), kind);
-    assert.ok(rows.filter((row) => row[1] === 'launch' || row[1] === 'tool').every((row) => row[2]!.includes('with-secrets --as errand-caller')));
+    const kinds = new Set(['consumer', 'grant', 'launch', 'restart', 'health', 'status']);
+    assert.ok(rows.every((row) => row.length === 4 && kinds.has(row[0]!) && row[1] === 'errand-caller'));
+    assert.deepEqual(rows.filter((row) => row[0] === 'consumer').map((row) => row[2]), ['service']);
+    const grants = rows.filter((row) => row[0] === 'grant');
+    assert.deepEqual(grants.map((row) => row[2]), ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'GOOGLE_API_KEY']);
+    assert.ok(grants.every((row) => row[3] === row[2]));
+    for (const kind of ['launch', 'restart', 'health', 'status']) assert.ok(rows.some((row) => row[0] === kind), kind);
+    assert.deepEqual(rows.filter((row) => row[0] === 'launch').map((row) => row[2]), ['~/.config/systemd/user/atwood-errand.service', '~/.local/bin/errand']);
+    assert.ok(rows.filter((row) => row[0] === 'launch').every((row) => row[3] === 'with-secrets --as errand-caller'));
     assert.equal(/[A-Z_]+=\S/.test(read('keystore-rows.tsv')), false, 'no NAME=value');
+  });
+
+  it('the unit and the wrapper use the live with-secrets path and set the Dublin Twilio base (T22)', () => {
+    for (const name of ['atwood-errand.service', 'errand']) {
+      const text = read(name);
+      assert.ok(text.includes('/home/col/.sam/bin/with-secrets --as errand-caller --'), name);
+      assert.equal(text.includes('.local/bin/with-secrets'), false, name);
+    }
+    const unitBase = read('atwood-errand.service').match(/^Environment=TWILIO_API_BASE_URL=(\S+)$/m)?.[1];
+    assert.ok(unitBase, 'unit sets TWILIO_API_BASE_URL');
+    assert.doesNotThrow(() => requireTwilioBase({ TWILIO_API_BASE_URL: unitBase }));
+    assert.equal(read('errand').match(/^TWILIO_API_BASE_URL=(\S+) exec /m)?.[1], unitBase);
   });
 });
 

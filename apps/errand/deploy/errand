@@ -3,7 +3,8 @@
 #
 # Runs the errand CLI through the keystore as the `errand-caller` consumer, with the tarball
 # Node (the system Node ignores --experimental-strip-types). Credentials reach the process
-# environment by name only; this script never reads or prints one.
-exec /home/col/.local/bin/with-secrets --as errand-caller -- \
+# environment by name only; this script never reads or prints one. TWILIO_API_BASE_URL is config,
+# not a secret (the account's Dublin base, as in atwood-errand.service).
+TWILIO_API_BASE_URL=https://api.dublin.ie1.twilio.com/2010-04-01 exec /home/col/.sam/bin/with-secrets --as errand-caller -- \
   /home/col/.local/node/bin/node --experimental-strip-types \
   /home/col/receptionist-platform/apps/errand/src/cli.ts "$@"

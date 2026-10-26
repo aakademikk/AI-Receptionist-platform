@@ -26,9 +26,8 @@ installs it. Each live step is a GATE run by SAM with Colin, on Colin's go
 2. `git rev-parse HEAD` is the T21 commit; core, relay and errand tests and typechecks are green.
 3. Back up `~/.sam/consumer-map.tsv` the house way. Add the `keystore-rows.tsv` rows, **matching the live
    map's column layout** (the map is not in the repo; the staged file says so). Run
-   `with-secrets --check-wiring` and confirm it is clean for `errand-caller`. Confirm the `with-secrets`
-   path (`/home/col/.local/bin/with-secrets`) and its `--` separator against the live tool; adjust the
-   unit and the wrapper if either differs.
+   `with-secrets --check-wiring` and confirm it is clean for `errand-caller`. The live `with-secrets` is
+   `/home/col/.sam/bin/with-secrets` (checked 2026-10-26; the unit and the wrapper use it).
 4. Install the unit, the prune service and timer, and `~/.local/bin/errand`.
    `systemctl --user daemon-reload`; `systemctl --user enable --now atwood-errand errand-prune.timer`.
 5. Read back: `curl -s -w ' %{http_code}\n' http://127.0.0.1:3003/errand/health` → `{"ok":true} 200`;
