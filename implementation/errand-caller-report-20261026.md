@@ -176,3 +176,29 @@ words, no trunk zero (shape); allowed 0113/+44 113, 0118, 020 (four spellings in
 UTC-vs-UK check.
 
 Counts: before core 284 / relay 86 / errand 48; after core 284 / relay 86 / errand 91. All typechecks clean.
+
+## T9: batch guard and one-errand-at-a-time guard — DONE
+
+Files (new): `apps/errand/src/guards/batch.ts`, `apps/errand/src/guards/live.ts`, `apps/errand/src/guards/batch.test.ts`,
+`apps/errand/src/guards/live.test.ts`.
+
+- `checkBatch({ run })`: runs `systemctl --user list-units --all --plain --no-legend robot-*` and `pgrep -af robot-run.mjs` through the
+  injected runner; refuses naming every `robot-*` unit (timer or service) and every live `robot-run.mjs` PID
+  ("robot batch: unit robot-guardtest-1.service loaded; robot-run.mjs PID 101 live"). A thrown runner, a non-zero `systemctl`, or a `pgrep` exit
+  above 1 refuses with "cannot check robot batch" (never passes open; `pgrep` exit 1 = nothing matched). `runCommand` is the live runner
+  (`execFile`, no shell, 5 s timeout, resolves the exit code).
+- `checkNoLiveErrand(now, { home })`: refuses "errand <id> is live" when an errand has a `dialled` event, no `outcome.json`, and was dialled
+  less than `MAX_CALL_S` + 5 minutes ago; older ones are left to the watchdog.
+
+Proof:
+```
+# before (batch.ts and live.ts moved aside): # tests 93  # pass 91  # fail 2
+Cannot find module '.../apps/errand/src/guards/batch.ts'
+Cannot find module '.../apps/errand/src/guards/live.ts'
+# after: # tests 102  # pass 102  # fail 0     typecheck exit 0
+```
+Tests (fake runner): `robot-guardtest-1.service` loaded refuses and names it; `robot-today-3.timer` refuses; a live `robot-run.mjs` refuses with
+its PID; several blockers named at once; an empty listing passes; four runner-error shapes refuse. A second errand while one is live is refused
+(Done-means 5); an outcome clears it; the 13-minute cut-off is exact. `runCommand` checked against `node -e` (harmless local process).
+
+Counts: before core 284 / relay 86 / errand 91; after core 284 / relay 86 / errand 102. All typechecks clean.

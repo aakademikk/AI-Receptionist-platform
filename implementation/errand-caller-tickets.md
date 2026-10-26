@@ -282,7 +282,7 @@ Do not touch: anything outside `apps/errand`.
 Proof: before, the test files do not exist. After: the errand suite passes; every row of the table has its expected result.
 
 ## T9: Batch guard and one-errand-at-a-time guard (must-dos 5, 6)
-Status: TODO
+Status: DONE 2026-10-26 (errand 102/102 pass, 11 new; core 284, relay 86 unchanged)
 Spec: must-dos 5, 6; fact F5; OPEN 9; Done-means 4, 5
 Depends on: T5
 Blocked by: none
