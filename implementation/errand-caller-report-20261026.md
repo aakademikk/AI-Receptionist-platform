@@ -337,3 +337,34 @@ Done-means 6 and 11 (detection with a ConversationRelay call, OPEN 5) and Done-m
 proofs, owed to SAM (T25, T26, T28).
 
 Counts: before core 284 / relay 86 / errand 137; after core 284 / relay 86 / errand 145. All typechecks clean.
+
+## T14: guardrails checked in code — DONE
+
+Files (new): `apps/errand/src/guardrails.ts`, `apps/errand/src/guardrails.test.ts`.
+
+- `checkTheirWords(text)`: `{ kind: 'payment', matched }` for card (card, card number, long number on the card, card details, credit, debit),
+  expiry, security code (CVV/CVC/CV2, three digits on the back), deposit, pre-payment, pay now / take a payment, bank details (sort code, account
+  number, IBAN, bank transfer), and a run of 12 or more digits read out (digits with spaces/dashes, or spoken number words); else `{ kind: 'ok' }`.
+- `checkAmyLine(line, brief)`: blocks any 9+ digit phone run other than Colin's mobile (compared as national digits, so `+44` and `0` forms match),
+  always the robot number, an email (incl. "at gmail", "dot com"), a UK postcode or street address, a date of birth, or a card/bank detail →
+  replacement "Colin will give that to you directly."; blocks agreement words together with anything beyond the goal (deposit, extra, add-on,
+  upgrade, sign-up, membership, newsletter, loyalty, change/cancel another booking) → "I can only book the table today, thank you." (a non-table
+  errand gets "I can only do what Colin asked today, thank you.").
+- `checkAgreedTime(time, window, offeredTimes)`: `HH:MM` or date+time; must be on the window's date and inside earliest..latest inclusive; a refused
+  time is added once to `offeredTimes`.
+- `callbackNumber(brief)`: Colin's mobile from the brief.
+- Separate from `packages/core/src/domain/handover.ts` (not read for reuse, not touched).
+
+Proof:
+```
+# before (guardrails.ts moved aside): # tests 146  # pass 145  # fail 1
+Cannot find module '.../apps/errand/src/guardrails.ts'
+# after: # tests 156  # pass 156  # fail 0     typecheck exit 0
+```
+Tests (Done-means 8): "Can I take a card number...", "We need a deposit...", "What's the long number on the card?", "Bank details please." and nine more
+each return `payment`; seven ordinary booking lines (including "a contact number in case we need to reach you?") do not; lines holding the robot
+number (three spellings), another number, an email, an address, a postcode, a date of birth, a sort code are blocked; five beyond-the-goal
+agreements are blocked; five ordinary Amy lines pass; 18:59 and 20:31 are refused and recorded once as offered, the edges pass; the callback number
+is Colin's mobile.
+
+Counts: before core 284 / relay 86 / errand 145; after core 284 / relay 86 / errand 156. All typechecks clean.

@@ -394,7 +394,7 @@ Do not touch: `apps/web/src/lib/conversation-relay.ts` (copy its values; never i
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T14: Guardrails checked in code (must-dos 9, 10, 11, 15)
-Status: TODO
+Status: DONE 2026-10-26 (errand 156/156 pass, 11 new; core 284, relay 86 unchanged)
 Spec: must-dos 9, 10, 11, 15; Done-means 7, 8
 Depends on: T5
 Blocked by: none
