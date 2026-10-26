@@ -323,7 +323,7 @@ Do not touch: `packages/core/src/integrations/twilio.ts`.
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T11: The dial step `errand dial` (must-dos 3 to 7, 18)
-Status: TODO
+Status: DONE 2026-10-26 (errand 121/121 pass, 15 new; mutation: 21 fail incl. the 4 go dial tests, restored go.ts diff empty; core 284, relay 86 unchanged)
 Spec: must-dos 3, 4, 5, 6, 7, 18; Done-means 2, 4, 5, 14, 20
 Depends on: T7, T8, T9, T10
 Blocked by: none

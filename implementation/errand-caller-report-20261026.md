@@ -225,3 +225,47 @@ Dublin base; empty base, the global host, missing credentials and a bad id each 
 14 999 ms, aborted at 15 000 ms as `timeout`, request count stays 1; a 400 returns `rejected` with Twilio's code; a network error returns `other`.
 
 Counts: before core 284 / relay 86 / errand 102; after core 284 / relay 86 / errand 106. All typechecks clean.
+
+## T11: the dial step `errand dial` — DONE
+
+Files (new): `apps/errand/src/dial.ts`, `apps/errand/src/dial.test.ts`.
+
+`dial(errandId, { check }, deps)`: guards in order health (`GET http://127.0.0.1:3003/errand/health`, 2 s; "errand service down") → go (T7) →
+number (T8, and must equal the read-back's E.164: "number differs from the read-back") → hours (T8) → batch (T9) → live (T9). Without `--check`
+it stops at the first refusal (`refused: <guard>: <reason>`, a `dial_refused` event, exit 3). With every guard passed: `markGoUsed` (exclusive create;
+a race loser gets "go consumed by another dial") → exactly one `createCall` → `dialled` event (CallSid masked, number) → watchdog via
+`systemd-run --user --on-active=20m --unit=errand-watch-<id> <errand CLI> watch <id>` through the injected runner (`watch_scheduled` event; a scheduling
+failure is printed, the call stays placed). A failed create writes a `create_failed` event and outcome `not_reached` / "failed to place", calls the
+injected reporter once, exits 1, and never calls create again. `--check` runs every guard, prints `name: pass` or `name: refused: <reason>` per line,
+never consumes the Go or creates. Exit codes 0 / 3 / 1. `errandServiceHealthy()` is the live health check. Reporter (T17) and CLI command (T19) are
+injected.
+
+Proof:
+```
+# before (dial.ts moved aside): # tests 107  # pass 106  # fail 1
+Cannot find module '.../apps/errand/src/dial.ts'
+# after: # tests 121  # pass 121  # fail 0     typecheck exit 0
+```
+Tests (fake Twilio counting creates): no go, a go for a brief edited after read-back, an expired go and a used go each give 0 creates and their reason;
+a valid go gives exactly 1 create to the read-back's E.164 with `go-used.json` written; a second dial on the same errand gives 0 (used go); service
+down refuses first and leaves the Go unused; batch and hours refusals; a second errand while one is live is refused; the watchdog command and unit name;
+a failed create is not retried (count 1, outcome "failed to place", reported once, no watchdog); `--check` never creates, with and without a go.
+
+Mutation check (step 5): `checkGo` replaced by one returning ok, suite run, file restored.
+```
+--- mutated run:
+# tests 121  # pass 100  # fail 21
+    not ok 1 - no go: zero creates and the reason
+    not ok 2 - a go for a brief edited after read-back: zero creates
+    not ok 3 - an expired go: zero creates
+    not ok 4 - a used go: the second dial on the same errand gives zero creates (must-do 18)
+    (plus 1 dial --check test and 16 go.test.ts tests, which call checkGo directly)
+--- restored: git diff --stat src/go.ts   -> (empty: identical to the committed code)
+# tests 121  # pass 121  # fail 0
+```
+Before / after the mutation: 121 pass → 100 pass, 21 fail (the four Done-means 2 dial tests among them) → restored 121 pass.
+
+Note: a create that *times out* may still have been placed by Twilio. Per the ticket it is settled at once as "not reached: failed to place";
+the outcome is write-once, so a later status callback for such a call is logged but does not change it. Flagged for SAM below.
+
+Counts: before core 284 / relay 86 / errand 106; after core 284 / relay 86 / errand 121. All typechecks clean.
