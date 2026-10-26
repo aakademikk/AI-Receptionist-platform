@@ -56,3 +56,35 @@ $ pnpm --filter @atwood/errand typecheck   # exit 0
 # reverted (cp from backup): pass 7, fail 0
 ```
 Counts: before core 284 / relay 86 / errand (none); after core 284 / relay 86 / errand 7. Typechecks clean.
+
+## T5: errand folder store — DONE
+
+Files (new):
+- `apps/errand/src/brief.ts`: `Brief` type (business, number, goal, `goalKind` `table`|`other`, window date/earliest/latest,
+  details, contact name/mobile, limits fixed/added); `FIXED_LIMITS` (the guardrails by name); `validateBrief()` returns the stored shape or
+  `{field, error}` naming the field (a table needs `details.partySize`; fixed limits filled in when absent, refused if any is dropped);
+  `canonicalJson()` (keys sorted at every level) and `briefHash()` (sha256 hex).
+- `apps/errand/src/store.ts`: id regex check before any path (`assertErrandId`, `errandDir`); `makeErrandId` (UK local date/time + slug);
+  `newErrand` (folder mode 700, non-recursive create so a clash takes `-2`; `brief.json` exclusive; `created` event); `writeBrief` (atomic
+  replace + `brief_edited` event); `writeReadback`/`readReadback` (atomic replace); `writeGoUsed` (exclusive `wx`); `appendEvent`
+  (`events.jsonl`: time, kind, fields); `appendTranscript` (`transcript.jsonl`: time, speaker `amy`|`them`, words); `writeOutcome` and
+  `writeAlert` (exclusive, return false on a second write); readers for each; `listErrands`, `dialledAt`. Files mode 600. Types `Readback`,
+  `GoUsed`, `Outcome` (kinds booked / not_booked / voicemail_left / not_reached / ended_early / failed; `limit` payment asked / confused /
+  turn cap / maximum length), `Alert`.
+- `apps/errand/src/testing/fixtures.ts`: sample brief (Ofcom drama-range numbers only) and temp-folder helper. Test-only.
+- `apps/errand/src/brief.test.ts`, `apps/errand/src/store.test.ts`.
+
+Proof:
+```
+# before (store.ts and brief.ts moved aside):
+# tests 9  # pass 7  # fail 2
+Cannot find module '/home/user/AI-Receptionist-platform/apps/errand/src/brief.ts'
+# after:
+# tests 23  # pass 23  # fail 0      typecheck exit 0
+```
+Tests cover: bad ids refused before any path is built (and nothing created); a table brief without party size fails naming
+`details.partySize`; every other field named; the hash is key-order independent and changes on each of ten single-field edits;
+`go-used.json`, `outcome.json`, `alert.json` cannot be written twice; a scripted sequence leaves brief, read-back, go, events (status
+changes, `answered` with `AnsweredBy`, digits), transcript and outcome in the folder, all mode 600.
+
+Counts: before core 284 / relay 86 / errand 7; after core 284 / relay 86 / errand 23. All typechecks clean.

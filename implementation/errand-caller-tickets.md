@@ -199,7 +199,7 @@ Proof: before, `apps/errand` does not exist. After: `pnpm --filter @atwood/erran
 temporarily adding `import '@atwood/core/domain'` to a source file makes the boundary test fail (revert it).
 
 ## T5: Errand folder store: id, brief, events, transcript, outcome
-Status: TODO
+Status: DONE 2026-10-26 (errand 23/23 pass, 16 new; core 284, relay 86 unchanged)
 Spec: must-dos 1, 17; Robustness "Data model"
 Depends on: T4
 Blocked by: none
