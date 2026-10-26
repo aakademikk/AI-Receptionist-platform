@@ -305,3 +305,35 @@ wrong → 403, signed → 101; bad/unknown ids get a hang-up and never reach the
 Done-means 17 through the *public hostname* is owed to SAM (T23); these tests prove the same refusals on the process itself.
 
 Counts: before core 284 / relay 86 / errand 121; after core 284 / relay 86 / errand 137. All typechecks clean.
+The first relay run at T12 hit the known flake (`not ok 3 - probe one sends the first part at once and the last part at 4,000 ms`, 85/86);
+the two runs straight after gave 86/86. `apps/relay` is unchanged.
+
+## T13: call instructions endpoint, person or machine — DONE
+
+Files: `apps/errand/src/twiml.ts` (new), `apps/errand/src/twiml.test.ts` (new), `apps/errand/src/server.ts` (edit: the default `twiml` handler is
+now `errandTwiml(errandId, params, { home })`; +2 lines), `apps/errand/src/store.ts` (edit: `Outcome.source` gains `'twiml'`).
+
+`errandTwiml()` appends an `answered` event (`AnsweredBy` value or null, mode, masked CallSid), then:
+- `human`, `unknown`, absent (and any unrecognised value) → person: core's `buildConversationRelayTwiml` with url
+  `wss://receptionist.atwoodsystems.co.uk/errand/ws`, **no `welcomeGreeting`**, `language` and `ttsLanguage` `en-GB`, `ttsProvider` ElevenLabs,
+  `voice` `VOICE_ID`, `transcriptionProvider` Deepgram, `speechTimeout` 1200 (facts B5), `dtmfDetection` on, parameters `errandId`, `answeredBy`,
+  `mode=person`; `interruptible` left unset as VOLTA does.
+- `machine_end_beep` / `_silence` / `_other` → the same TwiML with `mode=voicemail`.
+- `fax`, `machine_start*` → core's hang-up TwiML, and `outcome.json` "not reached: machine without a message point" written at once (write-once).
+- Every ConversationRelay response ends with `<Hangup/>` after `</Connect>`: facts B4 found Twilio's behaviour after `<Connect>` without `action`
+  NOT DOCUMENTED and advised not to rely on the default. (An addition to the ticket's steps, taken from the facts file.)
+
+Proof:
+```
+# before (twiml.ts moved aside, server.ts at its T12 version): # tests 138  # pass 137  # fail 1
+Cannot find module '.../apps/errand/src/twiml.ts'
+# after: # tests 145  # pass 145  # fail 0     typecheck exit 0
+```
+Tests: each `AnsweredBy` value gives its mode; no `welcomeGreeting` in any output; the voice attribute equals `VOICE_ID` and the rest match facts B5;
+fax hangs up and settles the outcome; the `answered` event holds the value and the masked CallSid; through the server an unsigned request is 403
+and records nothing, a signed one gets the person TwiML.
+
+Done-means 6 and 11 (detection with a ConversationRelay call, OPEN 5) and Done-means 7 (Amy waits with no welcome greeting, OPEN 6) are live
+proofs, owed to SAM (T25, T26, T28).
+
+Counts: before core 284 / relay 86 / errand 137; after core 284 / relay 86 / errand 145. All typechecks clean.

@@ -6,6 +6,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 
 import { ERRAND_PORT, HEALTH_PATH, SOCKET_PATH, STATUS_PATH, TWIML_PATH, errandHome, maskSid } from './config.ts';
 import { verifySocket, verifyWebhook } from './signature.ts';
+import { errandTwiml } from './twiml.ts';
 import { errandExists, isErrandId } from './store.ts';
 
 /**
@@ -94,7 +95,7 @@ function header(request: IncomingMessage, name: string): string | undefined {
 export function createErrandServer(deps: ServerDeps): { server: Server; sockets: WebSocketServer } {
   const home = deps.home ?? errandHome();
   const log = deps.log ?? jsonLog;
-  const twiml = deps.twiml ?? (() => buildHangupTwiml());
+  const twiml = deps.twiml ?? ((errandId: string, params: Record<string, string>) => errandTwiml(errandId, params, { home }));
   const status = deps.status ?? (() => undefined);
   const connection = deps.connection ?? ((ws: WebSocket) => ws.close(1000, 'no session handler'));
 

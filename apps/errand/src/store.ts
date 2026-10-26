@@ -80,8 +80,8 @@ export interface Outcome {
   reference?: string;
   /** Times the business offered that sat outside the window. */
   offeredTimes?: string[];
-  /** Who settled it: the call session, the status callback, the dial step. */
-  source: 'session' | 'status' | 'dial';
+  /** Who settled it: the call session, the status callback, the dial step, the call instructions. */
+  source: 'session' | 'status' | 'dial' | 'twiml';
   at: string;
 }
 

@@ -372,7 +372,7 @@ Do not touch: `apps/relay`.
 Proof: before, the test files do not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T13: Call instructions (TwiML) endpoint: person or machine (must-dos 8, 14)
-Status: TODO
+Status: DONE 2026-10-26 (errand 145/145 pass, 8 new; core 284, relay 86 unchanged; live detection proofs owed to SAM at T25/T28)
 Spec: must-dos 8, 14; fact F2; OPEN 4, 5, 6; Done-means 6, 11
 Depends on: T2, T5, T12
 Blocked by: none
