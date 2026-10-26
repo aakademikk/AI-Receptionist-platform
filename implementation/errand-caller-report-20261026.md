@@ -118,3 +118,32 @@ a refused number sends nothing and writes no read-back; the notifier is called o
 failure is recorded and the read-back kept; the live question writer makes a closer.json holding only the question, and refuses a bad job id.
 
 Counts: before core 284 / relay 86 / errand 23; after core 284 / relay 86 / errand 30. All typechecks clean.
+
+## T7: Go-record check — DONE
+
+Files (new): `apps/errand/src/go.ts`, `apps/errand/src/go.test.ts`; `apps/errand/src/testing/fixtures.ts` (edit: `bridgeAnswer()` plays
+`closer_answer.py` on a temp store, `pushLogEntry()` writes a temp push-log line).
+
+`checkGo(errandId, now, deps)` reads only the read-back's pins from the errand folder (question id, job id, question text and options,
+brief hash, sent time) and the bridge's `closer.json` at `<store>/<jobId>/closer.json`; it never searches the store. Refusals, in order:
+`no read-back`; malformed ids; `no bridge record for the read-back's question` (missing file or question); `bridge record is not a regular file`
+(symlink); `bridge record is not owned by this user`; unreadable / no questions list; `bridge question does not match the read-back` (kind, text,
+options, facts A5 rule 5); `not answered yet`; `Colin chose Cancel`; `answer is not Go` (declined, failed, other); `answer was not written by the
+bridge` (`answeredVia` not push or tab); malformed times; `no push-log entry for the Go question before the answer` (facts A5 second trace);
+`answered before the read-back was sent`; `answer time is in the future` (beyond 60 s skew); `go expired (30 minutes)` (`now - answeredAt >=
+GO_EXPIRY_MS`); `go expired (answered more than 30 minutes after the read-back)` (facts A5 rule 4); `brief edited after read-back`; `go already used`.
+`markGoUsed()` writes `go-used.json` by exclusive create; a racing second call returns `go already used`.
+
+Both expiry rules are enforced (the ticket's "now - answeredAt" and the facts' "answeredAt no more than 30 minutes after createdAt"): the stricter
+reading, failing closed.
+
+Proof:
+```
+# before (go.ts moved aside): # tests 31  # pass 30  # fail 1
+Cannot find module '/home/user/AI-Receptionist-platform/apps/errand/src/go.ts'
+# after: # tests 48  # pass 48  # fail 0      typecheck exit 0
+```
+Tests: each refusal above returns its reason; a valid Go (tab, and push) returns ok; 29 min 59 s passes and 30 min fails; a second
+`markGoUsed` fails.
+
+Counts: before core 284 / relay 86 / errand 30; after core 284 / relay 86 / errand 48. All typechecks clean.

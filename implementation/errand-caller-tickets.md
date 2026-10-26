@@ -243,7 +243,7 @@ Do not touch: `notify-colin.sh`, SAM_ui, the closer (call them only through the 
 Proof: before, the test file does not exist. After: the errand suite passes with the new tests, which failed before.
 
 ## T7: Go-record check (must-do 3)
-Status: TODO
+Status: DONE 2026-10-26 (errand 48/48 pass, 18 new; core 284, relay 86 unchanged)
 Spec: must-do 3; OPEN 1, OPEN 2; Done-means 2
 Depends on: T1, T5, T6
 Blocked by: none
