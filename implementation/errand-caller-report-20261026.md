@@ -557,3 +557,81 @@ tarball Node and carries port 3003 and the hardening; the timer is 04:40; the wr
 rows grant exactly the four names with no `NAME=value`; the runbook names T22 to T33, the rollback, the restore and the base commit.
 
 Counts: before core 284 / relay 86 / errand 235; after core 284 / relay 86 / errand 243. All typechecks clean.
+
+## T21: suites green, boundary diff, mutation check, commit — DONE
+
+Files: `implementation/errand-caller-build-report.md` (new); the T21 `Status:` line in the tickets file.
+
+Proof:
+```
+core: tests 284 pass 284 fail 0 (exit 0) [run 1]     core: typecheck exit 0
+relay: tests 86 pass 86 fail 0 (exit 0) [run 1]      relay: typecheck exit 0
+errand: tests 243 pass 243 fail 0 (exit 0) [run 1]   errand: typecheck exit 0
+web typecheck exit 0
+--- boundary diff:
+$ git diff --stat 2ea20b869167128f9623a8f3733cdc79e6354292..HEAD -- apps/relay/src packages/core/src/domain apps/web supabase
+(end of boundary diff)            <- empty
+$ git diff --stat 2ea20b8..HEAD -- apps/relay packages/core      <- also empty
+$ git diff --stat 2ea20b8..HEAD -- . ':!apps/errand'
+ implementation/errand-caller-facts.md           | 205 +++   (SAM's T1-T3 commit 90bb6db, before this build)
+ implementation/errand-caller-report-20261026.md | 559 +++
+ implementation/errand-caller-tickets.md         |  34 +-    (Status: lines only)
+ pnpm-lock.yaml                                  |  19 +
+--- mutation re-run (checkGo returns ok):
+# tests 243  # pass 220  # fail 23   (the four Done-means 2 dial tests, 2 CLI dial tests, 1 --check test, 16 go tests)
+--- restored: git diff --stat src/go.ts -> empty;  # tests 243  # pass 243  # fail 0
+```
+Counts: core 284 and relay 86, equal to the T4 baseline; errand 243. The commit is on `cloud/errand-caller` and pushed (this session's instructions);
+the tickets file's "commit on `restyle/glassmorphism` through the Atwood gate, no push" was overridden by those instructions, and the gate is not
+available in the container.
+
+## Summary
+
+| ticket | status | errand tests after | core / relay |
+|---|---|---|---|
+| T4 scaffold, locked values, boundary test | DONE | 7 | 284 / 86 |
+| T5 folder store, brief, hash | DONE | 23 | 284 / 86 |
+| T6 read-back and gated Go question | DONE | 30 | 284 / 86 |
+| T7 Go-record check | DONE | 48 | 284 / 86 |
+| T8 number and calling-hours guards | DONE | 91 | 284 / 86 |
+| T9 batch and one-at-a-time guards | DONE | 102 | 284 / 86 |
+| T10 call create on the Dublin edge | DONE | 106 | 284 / 86 |
+| T11 dial step (+ mutation check) | DONE | 121 | 284 / 86 |
+| T12 server, fail-closed signatures | DONE | 137 | 284 / 86 |
+| T13 TwiML: person, voicemail, hang-up | DONE | 145 | 284 / 86 |
+| T14 guardrails in code | DONE | 156 | 284 / 86 |
+| T15 turn engine and prompt | DONE | 173 | 284 / 86 |
+| T16 socket session | DONE | 184 | 284 / 86 |
+| T17 status callback and report | DONE | 202 | 284 / 86 |
+| T18 watchdog and prune | DONE | 209 | 284 / 86 |
+| T19 CLI and SAM.md | DONE | 235 | 284 / 86 |
+| T20 staged deploy files and runbook | DONE (keystore format and `with-secrets` path owed to SAM) | 243 | 284 / 86 |
+| T21 suites, boundary diff, mutation, commit | DONE | 243 | 284 / 86 |
+
+No ticket was blocked by a conflict between its instructions and the code. T22 was not started.
+
+## For SAM to check
+
+Claims this session could not prove in the cloud container (no live box, no Dublin edge, no real Twilio, no `~/.sam`):
+
+1. **Every live proof** (T22 to T33, untouched): Done-means 1, 4 (live part), 6, 7, 8 (live part), 11, 12, 13, 16 (tenant rows, VOLTA read-back,
+   relay PID), 17 through the public hostname, 18, 19, 20.
+2. **Synchronous detection with ConversationRelay** (OPEN 5) and **no welcome greeting means Amy waits** (OPEN 6): built per facts B2/B4, unproven until T25, T26, T28.
+3. **Call resource `answered_by` values** (facts B2: NOT DOCUMENTED) — the code records `AnsweredBy` from the `Url` request; compare with the Dublin read-back at T25.
+4. **`<Hangup/>` after `<Connect>`** was added from facts B4's advice (behaviour without `action` NOT DOCUMENTED); confirm the call ends cleanly at T25.
+5. **The keystore map format** (`~/.sam/consumer-map.tsv` is not in the repo): `apps/errand/deploy/keystore-rows.tsv` is staged as `consumer<TAB>kind<TAB>entry`
+   and must be matched to the live layout at T22, then `with-secrets --check-wiring`.
+6. **`with-secrets` path and calling convention**: assumed `/home/col/.local/bin/with-secrets --as errand-caller -- <command>` in the unit, the wrapper and the rows.
+7. **`notify-colin.sh --full <text>`**: the tickets name a `--full` flag; the facts file does not describe it. Check the live script accepts `--full` (and
+   `--question`, `--options`, `--job` together) before the first read-back, or the read-back push may fail. The exit code is recorded either way.
+8. **The Go question in a hand-written `closer.json`** (facts A2: "supported only by the precedent"): check SAM_ui shows the `job_errand-*` question in
+   the SAM tab, the push's Go button opens it, step-up works, and `closer_answer.py` writes `Chose Go` — the first read-back at T25 proves it.
+9. **The push-log second trace**: the Go check requires a `~/.sam/push-log.jsonl` entry for the question before the answer (facts A5). If `sam-push` does
+   not log the errand push (for example the push is not sent), every Go for that read-back is refused with "no push-log entry ...". Check at T25.
+10. **A create that times out** (15 s) is settled at once as "not reached: failed to place" (ticket T11). Twilio may still have placed the call; the
+    outcome is write-once, so a later status callback is logged but does not change it. Worth a look if it ever happens.
+11. **Calling-hours and live-errand timing** use the box clock; the robot-batch guard uses the live `systemctl --user` and `pgrep` (T24 proves the batch line).
+12. **The model** `gemini-3.8-flash` at effort `low` with structured JSON output (facts B6) has only run against a fake; the first live call is the proof,
+    including the 8-second turn limit against real latency (p95 3.6 s in the bench).
+13. **The Atwood gate** (`gate-prepush` / `gate-detector`) was not run: not available in the container.
+14. **Relay flake**: `apps/relay/src/protocol.test.ts:813` fails about 1 run in 6 on a real-clock millisecond (pre-existing, out of bounds to fix here).

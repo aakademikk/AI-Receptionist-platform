@@ -559,7 +559,7 @@ Do not touch: `~/.config/systemd/user`, `~/.cloudflared`, `~/.sam/consumer-map.t
 Proof: before, `apps/errand/deploy` does not exist. After: the seven files exist, the rule test passes, and the runbook names each GATE step.
 
 ## T21: Suites green, boundary diff, mutation check and commit
-Status: TODO
+Status: DONE 2026-10-26 (core 284, relay 86 = T4 baseline; errand 243/243; web typecheck clean; boundary diff empty; mutation 23 fail, go.ts restored identical; branch cloud/errand-caller, pushed; Atwood gate not available in the cloud, owed to SAM)
 Spec: must-do 20; Done-means 2 (mutation check), 16 (code part)
 Depends on: T4 to T20
 Blocked by: none
