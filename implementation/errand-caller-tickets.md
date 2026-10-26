@@ -89,7 +89,7 @@ This file was written by a tickets-only job: no code, no Twilio write, no call, 
 # Facts and read-only checks (SAM-RUN, no live change)
 
 ## T1: SAM-RUN: the Go-button bridge contract (OPEN 1, read-only)
-Status: TODO
+Status: DONE 2026-10-26 (facts section A, go-record contract)
 Spec: must-do 3; OPEN 1 ("a Go button on Telegram or phone-push, written by the bridge; SAM cannot write it"); OPEN 2
 Depends on: none
 Blocked by: none
@@ -118,7 +118,7 @@ created, the Telegram buttons answer (yes or no), the gated answer, and a go-rec
 `~/.sam`.
 
 ## T2: SAM-RUN: Twilio, ConversationRelay and model facts (read-only)
-Status: TODO
+Status: DONE 2026-10-26 (facts section B, 8 steps FOUND/NOT DOCUMENTED)
 Spec: must-dos 7, 8, 13, 14; facts F1, F2; OPEN 4, 5, 6, 10, 16
 Depends on: none
 Blocked by: none
@@ -147,7 +147,7 @@ Proof: before, section B does not exist. After: section B has eight steps, each 
 `grep -c "FOUND\|NOT DOCUMENTED" implementation/errand-caller-facts.md` prints at least 8.
 
 ## T3: SAM-RUN: baseline snapshot of the live box (read-only)
-Status: TODO
+Status: DONE 2026-10-26 (baseline + facts section C)
 Spec: must-dos 20, 22; Done-means 16, 18, 20 (the "before" figures); OPEN 8
 Depends on: none
 Blocked by: none
