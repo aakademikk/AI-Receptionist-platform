@@ -43,6 +43,19 @@ describe('validateBrief', () => {
     }
   });
 
+  it('keeps afterHours only when it is true, and refuses any other value (T34)', () => {
+    const on = validateBrief({ ...sampleBrief(), afterHours: true });
+    assert.ok(on.ok);
+    assert.equal(on.brief.afterHours, true);
+    const off = validateBrief(sampleBrief());
+    assert.ok(off.ok);
+    assert.equal('afterHours' in off.brief, false);
+    for (const value of [false, 'yes', 1, null]) {
+      const result = validateBrief({ ...sampleBrief(), afterHours: value });
+      assert.equal(!result.ok && result.field, 'afterHours', String(value));
+    }
+  });
+
   it('fills in the fixed limits when the brief names none', () => {
     const { limits: _limits, ...rest } = sampleBrief();
     const result = validateBrief(rest);
@@ -52,6 +65,10 @@ describe('validateBrief', () => {
 });
 
 describe('briefHash', () => {
+  it('changes when afterHours is set, so a Go for one cannot be used for the other (T34)', () => {
+    assert.notEqual(briefHash({ ...sampleBrief(), afterHours: true }), briefHash(sampleBrief()));
+  });
+
   it('is the same however the keys were ordered', () => {
     const brief = sampleBrief();
     const reordered = JSON.parse(canonicalJson(brief)) as typeof brief;

@@ -20,6 +20,14 @@ describe('checkCallingHours', () => {
     });
   }
 
+  it('passes outside the hours only when the brief says afterHours (OPEN 14, T34)', () => {
+    const twoAm = gmt('02:00');
+    assert.equal(checkCallingHours(twoAm).ok, false);
+    assert.equal(checkCallingHours(twoAm, { afterHours: false }).ok, false);
+    assert.deepEqual(checkCallingHours(twoAm, { afterHours: true }), { ok: true, note: 'after hours, on the brief' });
+    assert.deepEqual(checkCallingHours(gmt('14:00'), { afterHours: true }), { ok: true });
+  });
+
   it('reads the hour in UK time, not UTC: 07:30 UTC in July is 08:30 BST and dials', () => {
     assert.deepEqual(checkCallingHours(new Date('2026-07-15T07:30:00Z')), { ok: true });
     assert.equal(checkCallingHours(new Date('2026-07-15T20:30:00Z')).ok, false);

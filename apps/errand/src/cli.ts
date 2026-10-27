@@ -105,6 +105,7 @@ export function statusText(id: string, home: string): string[] {
     `Number: ${brief.number}`,
     `Goal: ${brief.goal}`,
     `Window: ${renderWindow(brief.window)}`,
+    ...(brief.afterHours ? ['After hours: yes'] : []),
     ...Object.entries(brief.details).map(([key, value]) => `Detail ${key}: ${value}`),
     `Contact: ${brief.contact.name}, ${brief.contact.mobile}`,
   ];

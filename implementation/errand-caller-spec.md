@@ -1,4 +1,4 @@
-Status: LOCKED 2026-10-26, Colin's decisions applied
+Status: LOCKED 2026-10-26, Colin's decisions applied; OPEN 14 changed by Colin 2026-10-27 (after-hours override, T34)
 
 # Errand caller: Amy places a call for Colin and reports back
 
@@ -255,7 +255,7 @@ Facts checked for this spec (read-only, 2026-10-22):
 - OPEN 11. Audio: transcript only, no recording.
 - OPEN 12. Retention: 90 days.
 - OPEN 13. 084 and 087 numbers refused in the first release.
-- OPEN 14. Calling-hours guard: refuse to dial outside 08:00 to 21:00 UK time.
+- OPEN 14. Calling-hours guard: refuse to dial outside 08:00 to 21:00 UK time, unless the brief says `afterHours: true`. Then the read-back shows an "After hours" line and Colin's Go on that read-back is his consent to dial outside the hours. (Changed by Colin 2026-10-27, option A: a fixed clock wrongly blocks a business open late, such as a 2 am pizza order.)
 - OPEN 15. Menu test (Done-means 10) skipped for the first release.
 - OPEN 16. Detection price: AMD $0.0075 a call; ConversationRelay about $0.07 a minute.
 - OPEN 17. Opening words: "Hi, this is Amy, an automated assistant calling on behalf of Colin Wood."

@@ -56,6 +56,11 @@ export interface Brief {
   contact: { name: string; mobile: string };
   /** The fixed guardrails by name, plus any Colin adds as text. */
   limits: { fixed: string[]; added: string[] };
+  /**
+   * Colin's after-hours consent (OPEN 14, changed 2026-10-27): present and `true` only when this
+   * call may dial outside the calling hours. The read-back says so, and his Go on it is the consent.
+   */
+  afterHours?: true;
 }
 
 export type BriefValidation = { ok: true; brief: Brief } | { ok: false; field: string; error: string };
@@ -138,6 +143,8 @@ export function validateBrief(input: unknown): BriefValidation {
   const added = limits.added ?? [];
   if (!Array.isArray(added) || !added.every((item) => nonEmpty(item))) return fail('limits.added', 'must be a list of text');
 
+  if (input.afterHours !== undefined && input.afterHours !== true) return fail('afterHours', 'must be true, or left out');
+
   return {
     ok: true,
     brief: {
@@ -149,6 +156,8 @@ export function validateBrief(input: unknown): BriefValidation {
       details: details as Record<string, string | number>,
       contact: { name: contact.name.trim(), mobile: contact.mobile.trim() },
       limits: { fixed: fixed as string[], added: (added as string[]).map((item) => item.trim()) },
+      // Only when set, so a brief without it hashes as it always did.
+      ...(input.afterHours === true ? { afterHours: true as const } : {}),
     },
   };
 }

@@ -4,7 +4,7 @@ import { mkdirSync, renameSync, writeFileSync, openSync, fsyncSync, closeSync } 
 import { join } from 'node:path';
 
 import { type Brief, briefHash, validateBrief } from './brief.ts';
-import { errandHome, jobStore, notifyBin } from './config.ts';
+import { CALLING_HOURS, errandHome, jobStore, notifyBin } from './config.ts';
 import { type Readback, appendEvent, assertErrandId, readBrief, writeReadback } from './store.ts';
 
 /**
@@ -31,6 +31,10 @@ import { type Readback, appendEvent, assertErrandId, readBrief, writeReadback } 
 
 export const GO_OPTIONS = ['Go', 'Cancel'] as const;
 export const READBACK_CLOSING = 'Tap Go to place this call. Nothing dials without it.';
+
+const hh = (hour: number): string => `${String(hour).padStart(2, '0')}:00`;
+/** Shown only for a brief with `afterHours: true`; Colin's Go on it lets the call dial outside the hours (OPEN 14). */
+export const AFTER_HOURS_LINE = `After hours: yes, this call may be placed outside ${hh(CALLING_HOURS.startHour)} to ${hh(CALLING_HOURS.endHour)} UK time`;
 
 /** The number check the dial step also runs (T8). Injected so this module does not fix the rules. */
 export type NumberCheck = (input: string) => { ok: true; e164: string } | { ok: false; reason: string };
@@ -120,6 +124,7 @@ export function renderReadback(brief: Brief, dialNumber: string): string {
       .map((key) => `${labelOf(key)}: ${brief.details[key]}`),
     `Name Amy may give: ${brief.contact.name}`,
     `Mobile Amy may give: ${brief.contact.mobile}`,
+    ...(brief.afterHours ? [AFTER_HOURS_LINE] : []),
     `Limits: ${[...brief.limits.fixed, ...brief.limits.added].join('; ')}`,
     `Brief #${hashTag(briefHash(brief))}`,
     READBACK_CLOSING,

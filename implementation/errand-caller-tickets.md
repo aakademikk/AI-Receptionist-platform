@@ -848,7 +848,7 @@ Proof: before, `report.md` does not exist. After: 20 done-means lines (19 PASS o
 | OPEN 11 transcript only, no recording | T4 (boundary test), T10 |
 | OPEN 12 retention 90 days | T18, T20, T22 |
 | OPEN 13 084 and 087 refused | T8 |
-| OPEN 14 calling hours 08:00 to 21:00 UK | T8, T11 |
+| OPEN 14 calling hours 08:00 to 21:00 UK, after-hours override on Colin's Go | T8, T11, T34 |
 | OPEN 15 menu test skipped | T33 |
 | OPEN 16 detection and ConversationRelay prices | T2, T33 |
 | OPEN 17 opening words | T4, T15, T16, T26 |
@@ -858,3 +858,23 @@ Proof: before, `report.md` does not exist. After: 20 done-means lines (19 PASS o
 | Failed Telegram falls back to the phone push; outcome stays on disk | T17 |
 | Refused dials said in chat at once | T11, T19 (SAM.md) |
 | Dial step runs only on this box as `col`; keys never printed | T19, T20, T22 |
+
+## T34: After-hours override (OPEN 14 change, Colin 2026-10-27)
+Status: DONE 2026-10-27 00:26 GMT on Colin's yes (w_02243400). errand 249/249, core 284/284, relay 86/86, typechecks 0; atwood-errand restarted (PID 2962541), health 200, relay, prod and tunnel PIDs unchanged
+Spec: OPEN 14 (changed 2026-10-27)
+Depends on: T8, T6, T11
+Blocked by: Colin's go on the code change and the restart of `atwood-errand`
+Context: Colin chose option A: keep 08:00 to 21:00 as the default, but let one errand dial outside it when its brief says so and
+Colin has tapped Go on a read-back that says so. The Go is already pinned to the brief hash and the read-back text, so no new consent path.
+Files: `apps/errand/src/brief.ts`, `readback.ts`, `guards/hours.ts`, `dial.ts`, `cli.ts` and their tests
+Steps:
+1. Brief: optional `afterHours`, only `true` accepted (anything else refused, naming the field); stored only when true, so existing hashes hold.
+2. Read-back: when true, a line `After hours: yes, this call may be placed outside 08:00 to 21:00 UK time` before Limits.
+3. Hours guard: passes outside the hours only when the brief says `afterHours: true`; `--check` prints `hours: pass (after hours, on the brief)`.
+4. Dial: an `after_hours` event (UK time) is written when the override is what let the call through.
+5. `errand status` shows `After hours: yes` when set.
+6. Suites and typechecks green; restart `atwood-errand` only; health 200; relay and prod PIDs unchanged.
+Do not touch: the Go check, the number, batch and live guards, the relay, the tunnel.
+Proof: before, `validateBrief` silently drops `afterHours` and a dial at 02:00 is refused. After: tests prove 02:00 refused without the flag,
+passed with it, the read-back line present only with it, and the flag changes the brief hash (so a Go without it cannot be reused).
+

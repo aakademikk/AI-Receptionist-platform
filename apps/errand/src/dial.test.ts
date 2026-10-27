@@ -166,6 +166,36 @@ describe('dial: the other guards and the create', () => {
     assert.equal(h.creates.length, 0);
   });
 
+  it('dials at 02:00 UK only when the brief says afterHours and Colin tapped Go on that read-back (T34)', async () => {
+    const night = (iso: string) => new Date(`2026-10-28T${iso}Z`);
+    const setUp = async (brief: ReturnType<typeof sampleBrief>) => {
+      const { id } = newErrand(brief, night('01:50:00'), home);
+      const result = await sendReadback(id, {
+        checkNumber: normaliseUkNumber,
+        createQuestion: createQuestionInStore(store),
+        notify: async () => 0,
+        now: () => night('01:50:00'),
+        home,
+      });
+      assert.ok(result.ok);
+      pushLogEntry(pushLogPath, result.readback.questionId, result.readback.jobId, Date.parse('2026-10-28T01:50:01Z'));
+      bridgeAnswer(store, result.readback.jobId, result.readback.questionId, { state: 'accepted', result: 'Chose Go', answeredAt: '2026-10-28T01:55:00Z', answeredVia: 'tab' });
+      return id;
+    };
+    const plain = await setUp(sampleBrief({ business: 'Plain' }));
+    const h = harness();
+    h.setClock(night('02:00:00'));
+    assert.deepEqual(await dial(plain, {}, h.deps), { code: 3, lines: ['refused: hours: outside calling hours (08:00 to 21:00 UK); it is 02:00 UK time now'] });
+    assert.equal(h.creates.length, 0);
+
+    const late = await setUp({ ...sampleBrief({ business: 'Late' }), afterHours: true });
+    const checked = await dial(late, { check: true }, h.deps);
+    assert.ok(checked.lines.includes('hours: pass (after hours, on the brief)'));
+    assert.equal((await dial(late, {}, h.deps)).code, 0);
+    assert.equal(h.creates.length, 1);
+    assert.ok(readEvents(late, home).some((event) => event.kind === 'after_hours' && event.ukTime === '02:00'));
+  });
+
   it('refuses while another errand is live', async () => {
     const first = await errandWithReadback();
     first.tapGo();

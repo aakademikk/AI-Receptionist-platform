@@ -1,7 +1,7 @@
 import { ERRAND_PORT, HEALTH_PATH, HEALTH_TIMEOUT_MS, errandHome, maskSid } from './config.ts';
 import { checkGo, markGoUsed, type GoDeps, type GoRecord } from './go.ts';
 import { type Runner, checkBatch } from './guards/batch.ts';
-import { checkCallingHours } from './guards/hours.ts';
+import { checkCallingHours, ukTime } from './guards/hours.ts';
 import { checkNoLiveErrand } from './guards/live.ts';
 import { normaliseUkNumber } from './guards/number.ts';
 import { appendEvent, assertErrandId, errandExists, readBrief, readReadback, writeOutcome } from './store.ts';
@@ -17,7 +17,8 @@ import type { CreateCallResult } from './twilio-call.ts';
  *                with no service, nobody would answer Twilio's call instructions request);
  *   2. go        Colin's Go for this exact read-back, under 30 minutes, unused (T7);
  *   3. number    an allowed UK kind, and the same E.164 the read-back showed (T8);
- *   4. hours     08:00 to 21:00 UK time (T8);
+ *   4. hours     08:00 to 21:00 UK time (T8), or outside it when the brief says `afterHours`
+ *                and Colin's Go is for that read-back (OPEN 14 change, T34);
  *   5. batch     no robot speed-test unit or process (T9);
  *   6. live      no other errand call live (T9).
  *
@@ -62,7 +63,7 @@ export interface DialResult {
   lines: string[];
 }
 
-type GuardResult = { ok: true } | { ok: false; reason: string };
+type GuardResult = { ok: true; note?: string } | { ok: false; reason: string };
 
 /** The live health check: the errand service's local-only endpoint, 2-second timeout. */
 export async function errandServiceHealthy(fetcher: typeof fetch = fetch): Promise<boolean> {
@@ -82,7 +83,7 @@ export async function dial(errandId: string, options: { check?: boolean }, deps:
     if (!errandExists(errandId, home)) return { code: EXIT_REFUSED, lines: ['refused: no such errand'] };
 
     // What the guards learned, for the create: the Go to consume and the number to ring.
-    const learned: { go?: GoRecord; e164?: string } = {};
+    const learned: { go?: GoRecord; e164?: string; afterHours?: boolean } = {};
     const guards: Array<[string, () => Promise<GuardResult> | GuardResult]> = [
       ['health', async () => ((await deps.health()) ? { ok: true } : { ok: false, reason: 'errand service down' })],
       [
@@ -105,7 +106,14 @@ export async function dial(errandId: string, options: { check?: boolean }, deps:
           return { ok: true };
         },
       ],
-      ['hours', () => checkCallingHours(deps.now())],
+      [
+        'hours',
+        () => {
+          const result = checkCallingHours(deps.now(), { afterHours: readBrief(errandId, home)?.afterHours === true });
+          if (result.ok && result.note) learned.afterHours = true;
+          return result;
+        },
+      ],
       ['batch', () => checkBatch({ run: deps.run })],
       ['live', () => checkNoLiveErrand(deps.now(), { home })],
     ];
@@ -115,7 +123,7 @@ export async function dial(errandId: string, options: { check?: boolean }, deps:
     for (const [name, guard] of guards) {
       const result = await guard();
       if (check) {
-        lines.push(result.ok ? `${name}: pass` : `${name}: refused: ${result.reason}`);
+        lines.push(result.ok ? `${name}: pass${result.note ? ` (${result.note})` : ''}` : `${name}: refused: ${result.reason}`);
         refused ||= !result.ok;
         continue;
       }
@@ -130,6 +138,7 @@ export async function dial(errandId: string, options: { check?: boolean }, deps:
     // passed the same guards loses this exclusive create and places nothing.
     const used = markGoUsed(errandId, learned.go!, deps.now(), home);
     if (!used.ok) return { code: EXIT_REFUSED, lines: ['refused: go consumed by another dial'] };
+    if (learned.afterHours) appendEvent(errandId, { kind: 'after_hours', ukTime: ukTime(deps.now()) }, deps.now(), home);
 
     const to = learned.e164!;
     const created = await deps.createCall({ errandId, to });

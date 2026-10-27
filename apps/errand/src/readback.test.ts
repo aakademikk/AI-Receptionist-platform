@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { briefHash } from './brief.ts';
 import {
+  AFTER_HOURS_LINE,
   type GoQuestion,
   type NumberCheck,
   READBACK_CLOSING,
@@ -71,6 +72,14 @@ describe('renderReadback', () => {
     for (const limit of [...brief.limits.fixed, 'no outdoor tables']) assert.ok(limit && limits.includes(limit), limit);
     assert.ok(lines.includes(`Brief #${briefHash(brief).slice(0, 8)}`));
     assert.equal(lines.at(-1), READBACK_CLOSING);
+  });
+
+  it('shows the after-hours line only when the brief says so (T34)', () => {
+    assert.equal(renderReadback(sampleBrief(), '+442079460123').includes('After hours'), false);
+    const lines = renderReadback({ ...sampleBrief(), afterHours: true }, '+442079460123').split('\n');
+    const at = lines.indexOf(AFTER_HOURS_LINE);
+    assert.equal(AFTER_HOURS_LINE, 'After hours: yes, this call may be placed outside 08:00 to 21:00 UK time');
+    assert.ok(at > 0 && lines[at + 1]!.startsWith('Limits: '));
   });
 
   it('spaces UK numbers the way they are said', () => {
