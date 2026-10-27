@@ -2,6 +2,8 @@ import path from 'node:path';
 
 import type { NextConfig } from 'next';
 
+import { securityHeaders } from './src/lib/security-headers.ts';
+
 const config: NextConfig = {
   reactStrictMode: true,
   /**
@@ -74,12 +76,9 @@ const config: NextConfig = {
     return [
       {
         source: '/:path*',
-        headers: [
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-        ],
+        // nosniff, X-Frame-Options, Referrer-Policy, Permissions-Policy and HSTS. The
+        // CSP is per request (it carries a nonce), so it is set in middleware.ts.
+        headers: securityHeaders,
       },
     ];
   },

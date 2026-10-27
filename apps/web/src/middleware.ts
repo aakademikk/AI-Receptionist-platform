@@ -1,6 +1,12 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import {
+  CSP_REPORT_ONLY_HEADER,
+  buildContentSecurityPolicy,
+  createNonce,
+} from '@/lib/security-headers';
+
 /**
  * Auth middleware.
  *
@@ -14,8 +20,30 @@ import { NextResponse, type NextRequest } from 'next/server';
  * That check belongs to RLS, which enforces it for every query rather than only on
  * navigation — a membership check here would be a second, weaker copy of a rule the
  * database already applies, and the kind of duplication that drifts.
+ *
+ * Separately from auth, it sets the per-request Content-Security-Policy (Report-Only
+ * for now, ticket H3) on every response it handles, redirects included. The policy
+ * lives in `lib/security-headers.ts`.
  */
 export async function middleware(request: NextRequest) {
+  const nonce = createNonce();
+  const policy = buildContentSecurityPolicy(nonce, {
+    dev: process.env['NODE_ENV'] === 'development',
+  });
+
+  // Next's documented nonce pattern. Set on the request before any
+  // `NextResponse.next({ request })` below copies the headers forward: Next reads
+  // the nonce back out of this header while rendering and stamps it on its own
+  // inline scripts. `x-nonce` is for any server component that needs it.
+  request.headers.set('x-nonce', nonce);
+  request.headers.set(CSP_REPORT_ONLY_HEADER, policy);
+
+  const response = await refreshSession(request);
+  response.headers.set(CSP_REPORT_ONLY_HEADER, policy);
+  return response;
+}
+
+async function refreshSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env['NEXT_PUBLIC_SUPABASE_URL'];
