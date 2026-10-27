@@ -616,7 +616,7 @@ Proof: before, `tunnel.md` does not exist and `ingress rule .../errand/twiml` ma
 `ingress rule` read-backs, the 426 and 200, and the six refusals.
 
 ## T24: GATE: batch guard on the live box (Done-means 4)
-Status: TODO
+Status: DONE 2026-10-27 00:58 GMT on Colin's go (w_822b84f6): batch refused with robot-guardtest-1, passed once stopped, 0 calls created. Test number 07700 900123 (Ofcom drama range) in place of Colin's mobile. Record ~/.sam/work/errand-caller/guard-live.md
 Spec: must-do 5; Done-means 4
 Depends on: T22
 Blocked by: Colin's go (a transient user unit is a systemd change)
