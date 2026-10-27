@@ -38,6 +38,29 @@ guards/: batch.ts, batch.test.ts, hours.ts, hours.test.ts, live.ts, live.test.ts
 
 Also read in full: `implementation/errand-caller-spec.md`.
 
+### `apps/relay` (10 of 10, read in full)
+
+README.md, atwood-relay.service, package.json, tsconfig.json, src/protocol.ts, src/protocol.test.ts,
+src/server.ts, src/server.integration.test.ts, src/signature.ts, src/signature.test.ts.
+
+### `packages/core` (66 of 66, read in full)
+
+package.json, tsconfig.json, src/index.ts, src/env.ts, src/env.test.ts;
+ai/: anthropic.ts, google.ts, google.test.ts, index.ts, openai.ts, provider.ts;
+crypto/: secrets.ts;
+domain/: booking.ts, closing.ts, closing.test.ts, context.ts, context.test.ts, handover.ts,
+handover.test.ts, index.ts, lead.ts, notify.ts, onboarding.ts, pipeline.ts, reply.ts, self-message.ts,
+self-message.test.ts, source.ts, source.test.ts, turn-timings.ts, turn-timings.test.ts, voice.ts, voice.test.ts;
+integrations/: elevenlabs-register.ts, elevenlabs-register.test.ts, email.ts, firecrawl.ts,
+google-calendar.ts, index.ts, twilio.ts, twilio.test.ts, voice-test-variant.ts, voice-test-variant.test.ts;
+prompts/: extraction.ts, index.ts, onboarding.ts, receptionist.ts, receptionist.test.ts, receptionist.behaviour.test.ts;
+supabase/: admin.ts, admin.test.ts; testing/: fake-provider.ts, fake-supabase.ts; types/: domain.ts;
+utils/: errors.ts, errors.test.ts, hours.ts, hours.test.ts, index.ts, logger.ts, phone.ts, redact.ts,
+sms.ts, sms.test.ts, speech.ts, speech.test.ts.
+
+Outside the scope, read only where a finding needed it: `supabase/migrations/0006` (notifications
+dedupe index), `0009` (`enqueue_notification`, `resume_ai`), `0014` (`resolve_inbound` reuse rule).
+
 ## Findings: `apps/errand`
 
 ### R1 (High). A Go can be moved to a different brief, number or after-hours flag by editing the errand folder
@@ -243,3 +266,171 @@ a test agree; if it is from creation, check `now - createdAt < GO_EXPIRY_MS`.
 - Boundary test is an allow-list on import specifiers; no errand file imports `@supabase/*`, core domain, relay or web.
 - `keystore-rows.tsv` and the unit/wrapper carry variable names only; no value.
 - Tests that cannot fail: none found in this package; each guard test asserts the exact refusal and a zero create count.
+
+## Findings: `apps/relay`
+
+### R9 (Low, partly UNPROVEN). The relay trusts the setup frame, and its handshake signature is a fixed, replayable value
+
+`apps/relay/src/protocol.ts:480-521` and `:587-596`, `apps/relay/src/signature.ts:126-140`,
+`packages/core/src/integrations/twilio.ts:603-609`.
+
+What is wrong. A WebSocket upgrade has no body, so `X-Twilio-Signature` for `wss://host/relay` is
+`HMAC(token, url)`: the same string on every call, with no nonce or expiry. Anyone holding one copy can
+open the socket at will, and the session then takes `to`, `from` and `callSid` from the client's
+`setup` frame and hands them to `replyToCaller`. That is enough to run the tenant pipeline for any
+tenant number (writes `messages`/`calls` rows, spends model tokens, raises owner alerts), and
+`recordInterruptedTurn` rewrites the metadata of any outbound message found by `callSid`.
+
+How a copy could leak (proven part): with `LOG_LEVEL=debug`, core's signature check logs the
+`expected` signature for every check, accepted or rejected. With a throwaway test token:
+
+```
+{"level":"debug","message":"Twilio signature payload",...,"payload":"wss://receptionist.example/relay",...,"expected":"<the valid signature>","presented":"wrong"}
+```
+
+`expected` and `presented` are not in `redact.ts`'s `SECRET_KEYS`, so they are written as-is. Debug is
+off by default (`env.ts:323`), so the leak needs a debug run on the live box. UNPROVEN: that the live
+relay ever ran at debug; what would prove it is a `"Twilio signature payload"` line in
+`journalctl --user -u atwood-relay`. The same applies to `/errand/ws` (R6).
+
+Fix: stop logging `expected` (log its length only), and bind the socket to the call: put a per-call
+HMAC of the CallSid in a `<Parameter>` of the signed TwiML and check it against the setup frame's
+`callSid` before the session accepts any prompt.
+
+### R10 (Low). `RELAY_MAX_TURNS` set to a non-number switches the hard turn limit off
+
+`apps/relay/src/server.ts:133`, `apps/relay/src/protocol.ts:376` and `:633`.
+`Number.parseInt('forty', 10)` is `NaN`; `options.maxTurns ?? 40` keeps `NaN` (it is not nullish) and
+`this.turns >= NaN` is always false, so the backstop "so a bug cannot bill somebody for an hour-long
+call" never fires. Fix: `Number.isFinite(n) && n > 0 ? n : 40`.
+
+### R11 (Low). The relay journal holds what callers say
+
+`apps/relay/src/protocol.ts:534` (`prompt_partial` with `text`) and `:554` (`prompt_final` with `text`),
+logged at info by `server.ts:139`. The logger's `redactText` strips emails, phone numbers, postcodes and
+card numbers, but names, addresses and everything else a caller says go to journald, which has its own
+retention outside `erase_contact()`. `turn-timings.ts:12-13` states the opposite rule for the timings
+line. Fix: log the length and turn number, not the words, or log them at debug.
+
+## Findings: `packages/core`
+
+### R12 (High). A second emergency on a resumed conversation alerts nobody, while the caller is told the team is on it
+
+`packages/core/src/domain/pipeline.ts:730-731` (dedupe key), with
+`supabase/migrations/0006_notifications_ai_analytics.sql:77-79` and
+`supabase/migrations/0009_rpc_functions.sql:504-508`.
+
+What is wrong. The owner's handover alert uses `dedupeKey: handover:<conversationId>:<reason>`.
+`enqueue_notification` appends the recipient id and inserts with `on conflict (business_id, dedupe_key)
+do nothing` against a permanent unique index. After a handover, the dashboard's resume
+(`resume_ai`, `0009:435-452`, called by `api/internal/v1/conversations/[conversationId]/resume`) sets
+the conversation back to `active`, and `resolve_inbound` reuses any `active` conversation for the same
+caller and channel (`0014:145-152`). So the next emergency from that caller on that thread goes down
+the handover path, the customer hears or reads "I'm passing this to the team right now"
+(`handover.ts:280`), `enqueue_notification` inserts nothing, and no email, SMS or webhook is sent.
+
+Evidence (the three pieces of code that combine):
+
+```ts
+// pipeline.ts:730
+    dedupeKey: `handover:${input.conversationId}:${input.reason}`,
+```
+```sql
+-- 0006:77
+create unique index notifications_dedupe_idx on public.notifications (business_id, dedupe_key) where dedupe_key is not null;
+-- 0009:504
+case when p_dedupe_key is null then null else p_dedupe_key || ':' || e.id::text end
+... on conflict (business_id, dedupe_key) where dedupe_key is not null do nothing
+-- 0009:445 resume_ai
+set status = 'active', ai_enabled = true, ... handover_at = null
+```
+
+Not run against a database (no live request). What would prove it end to end: on the local stack,
+send two emergency messages on one thread with a `resume_ai` between them and count
+`notifications` rows for `handover_required` (expect 1 per recipient, not 2).
+Fix: include the handover instance in the key, for example `handover:<conversationId>:<handover_at>`
+or the inbound message id, so each escalation alerts once and a retry of the same one still dedupes.
+
+### R13 (Medium). `isOpenNow` is wrong after midnight on any shift that crosses it
+
+`packages/core/src/utils/hours.ts:29-46`.
+
+What is wrong. The check reads only today's row. After midnight, the shift that is still running
+belongs to yesterday's row, which is never consulted, and today's overnight row is wrongly treated as
+already open from 00:00. This drives the prompt's "the business is open/closed" line
+(`prompts/receptionist.ts:57,127`), the after-hours SMS template choice (`receptionist.ts:486-490`)
+and booking slots (`domain/booking.ts:91-92`).
+
+Evidence:
+
+```
+Sat 01:00 London (Fri shift 20:00-02:00, Sat closed): open = false     (should be true)
+Sat 01:00 London (only Sat 20:00-02:00, Fri closed): open = true       (should be false)
+```
+
+The existing test (`hours.test.ts:49-55`) checks only 22:00 on the opening day.
+Fix: for `nowMinutes < closes` of an overnight row, look at the previous day's row; for today's
+overnight row, require `nowMinutes >= opens`.
+
+### R14 (Medium). `normalizePhone` keeps the trunk zero of `+44 (0)20 ...`, producing an undiallable number
+
+`packages/core/src/utils/phone.ts:55-63`.
+
+Evidence:
+
+```
+"+44 (0)20 7946 0123" -> +4402079460123
+"+44 020 7946 0123"   -> +4402079460123
+"020 7946 0123"       -> +442079460123
+```
+
+`+44 (0)...` is the common way UK numbers are printed on websites and in signatures. The lead extractor
+(`domain/lead.ts:180-183`) runs every model-transcribed phone number through this, so a lead's phone can
+be stored wrong and the callback number in the owner's alert is then wrong. The comment says the SQL
+`normalize_phone()` must agree; whether it has the same fault is not checked here (out of scope).
+Fix: after stripping to digits on the `+` branch, drop a `0` that immediately follows a `44` country code.
+
+### R15 (Low). A caller ringing back on a handed-over thread is never re-escalated, even for an emergency
+
+`packages/core/src/domain/handover.ts:123-125` with `domain/pipeline.ts:488-520`.
+On a callback call the conversation is `waiting_for_human`, so `detectHandover` returns no handover for
+anything, "fire" included; the assistant answers and the owner gets a plain `new_message` alert
+("The customer rang back...") rather than an urgent `handover_required`. The prompt tells the model to
+say 999 if anyone is in danger (`receptionist.ts:430`), so the caller is not left without advice, but
+the owner's alert does not say urgent. Fix: run the emergency patterns on callback turns and, on a hit,
+send the `handover_required` alert with `urgency: emergency`.
+
+### R16 (Low). Several Supabase writes on the reply path ignore their error
+
+`domain/pipeline.ts:379-383` (`request_handover`), `:362-367` (confusion count), `reply.ts:333-336`
+(summary), `lead.ts:130` (score), `onboarding.ts:88-96, 119-125, 149-157, 204-212` (job status).
+A failed `request_handover` leaves the conversation `active` and unmuted while the customer has been
+told a person is taking over, so the next message gets an AI reply. The confusion counter is also a
+read-modify-write (`memory.confusion_count + 1`), so two quick messages count once.
+Fix: check `error` on `request_handover` (log loudly at least), and increment in SQL.
+
+### R17 (Low). Owner webhook and Slack destinations are fetched server-side with no address check
+
+`packages/core/src/domain/notify.ts:178-195`. `notification.destination` is POSTed to as given.
+Whether a tenant user can set an internal URL depends on the web app's recipient form; see the web
+section for what the route allows. If they can, it is a blind SSRF from the box (for example to
+`http://127.0.0.1:54321` or the n8n port). Fix: allow only `https:` to public addresses for
+`webhook`/`slack` destinations, checked when saved and again before the fetch.
+
+## Checked and fine: `apps/relay` and `packages/core`
+
+- Relay upgrade is refused (401) before `handleUpgrade` when the signature is missing or wrong; the
+  process exits at boot without `TWILIO_AUTH_TOKEN`; non-upgrade HTTP gets 426; it listens on 127.0.0.1.
+- Taking the host from `X-Forwarded-Host` cannot widen the check: the HMAC still needs the token.
+- `validateTwilioSignature` compares every candidate token in constant time; secondary token honoured
+  only while set; `TWILIO_SKIP_SIGNATURE_CHECK` honoured only as the exact string `true` and throws when
+  `NODE_ENV=production` (see "For SAM to check" on how the web app is run).
+- Every TwiML builder escapes attribute and text values; `buildConversationRelayTwiml` refuses non-`wss://`.
+- `encryptSecret`/`decryptSecret`: AES-256-GCM, random 12-byte IV, auth tag checked, vague error on failure.
+- `verifySharedSecret` hashes both sides before `timingSafeEqual`, so length does not leak.
+- `ai_logs` request/response pass through `redactObject`; the voice timings line holds no words or numbers.
+- `searchKnowledge` strips the PostgREST `or()` metacharacters; tenant handover keywords are regex-escaped.
+- `generateReply` refuses truncated or empty model output rather than sending half a message.
+- Firecrawl URLs are normalised and obvious internal hosts refused; the fetch runs at Firecrawl, not here.
+- The errand package's core imports (`integrations/twilio`, `ai`) pull in env, logger and the AI SDKs
+  only, no Supabase client or domain code.
