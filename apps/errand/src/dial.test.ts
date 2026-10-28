@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { type DialDeps, dial, errandServiceHealthy } from './dial.ts';
 import type { Runner } from './guards/batch.ts';
+import { briefHash, validateBrief } from './brief.ts';
 import { normaliseUkNumber } from './guards/number.ts';
 import { createQuestionInStore, sendReadback } from './readback.ts';
-import { newErrand, readBrief, readEvents, readGoUsed, readOutcome, writeBrief } from './store.ts';
+import { newErrand, readBrief, readEvents, readGoUsed, readOutcome, readReadback, writeBrief, writeReadback } from './store.ts';
 import { bridgeAnswer, pushLogEntry, sampleBrief, tempDir } from './testing/fixtures.ts';
 import type { CreateCallResult } from './twilio-call.ts';
 
@@ -97,6 +98,21 @@ describe('dial: the go guard (Done-means 2)', () => {
     const h = harness();
     assert.deepEqual(await dial(id, {}, h.deps), { code: 3, lines: ['refused: go: brief edited after read-back'] });
     assert.equal(h.creates.length, 0);
+  });
+
+  it('a go moved to another number and after hours by rewriting readback.json: zero creates (Wave C R2)', async () => {
+    const { id, tapGo } = await errandWithReadback();
+    tapGo();
+    const edited = { ...readBrief(id, home)!, number: '020 7946 0999', afterHours: true };
+    writeBrief(id, edited, at(90), home);
+    const checked = validateBrief(edited);
+    assert.ok(checked.ok);
+    const rb = readReadback(id, home)!;
+    writeReadback(id, { ...rb, briefHash: briefHash(checked.brief), dialNumber: '+442079460999' }, home);
+    const h = harness();
+    assert.deepEqual(await dial(id, {}, h.deps), { code: 3, lines: ['refused: go: brief edited after read-back'] });
+    assert.equal(h.creates.length, 0);
+    assert.equal(readGoUsed(id, home), null);
   });
 
   it('an expired go: zero creates', async () => {

@@ -59,6 +59,8 @@ export interface GoUsed {
   answeredAt: string;
   answeredVia: string;
   briefHash: string;
+  /** The number the Go was for (Wave C R2); absent on records written before it. */
+  dialNumber?: string;
   usedAt: string;
 }
 

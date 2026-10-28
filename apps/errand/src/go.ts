@@ -3,7 +3,8 @@ import { join } from 'node:path';
 
 import { briefHash, validateBrief } from './brief.ts';
 import { GO_EXPIRY_MS, errandHome, jobStore, pushLog } from './config.ts';
-import { GO_OPTIONS } from './readback.ts';
+import { normaliseUkNumber } from './guards/number.ts';
+import { GO_OPTIONS, questionTextFor, renderReadback } from './readback.ts';
 import { type GoUsed, assertErrandId, readBrief, readGoUsed, readReadback, writeGoUsed } from './store.ts';
 
 /**
@@ -19,7 +20,10 @@ import { type GoUsed, assertErrandId, readBrief, readGoUsed, readReadback, write
  * job and question the read-back recorded, and never searches the store for a likely
  * match. From the errand folder it reads only what pins the Go to a brief: the read-back's
  * question id, job id, text, options and brief hash, and whether `go-used.json` exists.
- * Nothing SAM writes in the errand folder can turn a non-Go into a Go.
+ * Nothing SAM writes in the errand folder can turn a non-Go into a Go, and nothing it writes
+ * there can move a Go to another brief: the brief on disk is re-rendered and must give the exact
+ * text the bridge holds, and the number dialled is the one derived from it (Wave C R2), never
+ * `readback.json`'s copy.
  *
  * This is a convention-and-permissions proof, not a cryptographic one (facts A5): any
  * process running as `col` could edit the file. The file is therefore also required to be a
@@ -33,6 +37,8 @@ export interface GoRecord {
   answeredAt: string;
   answeredVia: 'push' | 'tab';
   briefHash: string;
+  /** The E.164 number the Go was given for, derived from the brief on disk. */
+  dialNumber: string;
 }
 
 export type GoCheck = { ok: true; go: GoRecord } | { ok: false; reason: string };
@@ -159,6 +165,12 @@ export function checkGo(errandId: string, now: Date, deps: GoDeps = {}): GoCheck
   const stored = readBrief(errandId, home);
   const checked = stored ? validateBrief(stored) : null;
   if (!checked?.ok || briefHash(checked.brief) !== readback.briefHash) return refuse('brief edited after read-back');
+  // Wave C R2: readback.json sits beside the brief, so it cannot vouch for it. The brief on disk
+  // must render to the text Colin tapped Go on, as the bridge recorded it.
+  const number = normaliseUkNumber(checked.brief.number);
+  if (!number.ok || questionTextFor(renderReadback(checked.brief, number.e164)) !== question.text) {
+    return refuse('brief edited after read-back');
+  }
 
   // Must-do 3c.
   if (readGoUsed(errandId, home)) return refuse('go already used');
@@ -171,6 +183,7 @@ export function checkGo(errandId: string, now: Date, deps: GoDeps = {}): GoCheck
       answeredAt: question.answeredAt,
       answeredVia: question.answeredVia,
       briefHash: readback.briefHash,
+      dialNumber: number.e164,
     },
   };
 }

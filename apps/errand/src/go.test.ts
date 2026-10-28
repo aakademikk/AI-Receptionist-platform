@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { checkGo, markGoUsed } from './go.ts';
+import { briefHash, validateBrief } from './brief.ts';
 import { createQuestionInStore, sendReadback } from './readback.ts';
-import { newErrand, readBrief, readReadback, writeBrief } from './store.ts';
+import { newErrand, readBrief, readReadback, writeBrief, writeReadback } from './store.ts';
 import { bridgeAnswer, pushLogEntry, sampleBrief, tempDir } from './testing/fixtures.ts';
 
 const T0 = Date.parse('2026-10-27T14:12:00Z');
@@ -52,7 +53,22 @@ describe('checkGo', () => {
     tapGo();
     const result = checkGo(id, at(120), deps());
     assert.ok(result.ok, JSON.stringify(result));
-    assert.deepEqual(result.go, { questionId, jobId, answeredAt: stamp(60), answeredVia: 'tab', briefHash: readReadback(id, home)!.briefHash });
+    assert.deepEqual(result.go, { questionId, jobId, answeredAt: stamp(60), answeredVia: 'tab', briefHash: readReadback(id, home)!.briefHash, dialNumber: '+442079460123' });
+  });
+
+  it('refuses a Go whose brief and readback.json were both rewritten after the Go (Wave C R2)', () => {
+    tapGo();
+    const original = readBrief(id, home)!;
+    const originalReadback = readReadback(id, home)!;
+    for (const change of [{ number: '020 7946 0999' }, { afterHours: true }]) {
+      const edited = { ...original, ...change };
+      writeBrief(id, edited, at(90), home);
+      const checked = validateBrief(edited);
+      assert.ok(checked.ok);
+      const dialNumber = 'number' in change ? '+442079460999' : originalReadback.dialNumber;
+      writeReadback(id, { ...originalReadback, briefHash: briefHash(checked.brief), dialNumber }, home);
+      assert.deepEqual(checkGo(id, at(120), deps()), { ok: false, reason: 'brief edited after read-back' }, JSON.stringify(change));
+    }
   });
 
   it('accepts a Go answered by push as well as tab', () => {

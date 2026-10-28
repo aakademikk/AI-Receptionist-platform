@@ -100,8 +100,10 @@ export async function dial(errandId: string, options: { check?: boolean }, deps:
           const brief = readBrief(errandId, home)!;
           const number = normaliseUkNumber(brief.number);
           if (!number.ok) return number;
-          const readback = readReadback(errandId, home);
-          if (readback && readback.dialNumber !== number.e164) return { ok: false, reason: 'number differs from the read-back' };
+          // The Go's number, re-derived from the brief Colin saw (Wave C R2); readback.json only
+          // when the Go guard did not pass, which is the --check listing.
+          const expected = learned.go?.dialNumber ?? readReadback(errandId, home)?.dialNumber;
+          if (expected && expected !== number.e164) return { ok: false, reason: 'number differs from the read-back' };
           learned.e164 = number.e164;
           return { ok: true };
         },
